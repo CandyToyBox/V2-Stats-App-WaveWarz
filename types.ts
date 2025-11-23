@@ -131,3 +131,31 @@ export interface ArtistStats {
   totalTVL: number;    // Peak TVL across all battles
   biggestWin: number;  // Largest single battle TVL
 }
+
+// --- TRADER ANALYTICS TYPES ---
+
+export interface TraderBattleHistory {
+  battleId: string;
+  artistAName: string;
+  artistBName: string;
+  imageUrl: string;
+  date: string;
+  invested: number;
+  payout: number;
+  pnl: number;
+  side?: 'A' | 'B';
+  outcome: 'WIN' | 'LOSS' | 'PENDING';
+}
+
+export interface TraderProfileStats {
+  walletAddress: string;
+  totalInvested: number;
+  totalPayout: number;
+  netPnL: number;
+  battlesParticipated: number;
+  wins: number;
+  losses: number;
+  winRate: number;
+  favoriteArtist: string;
+  history: TraderBattleHistory[];
+}

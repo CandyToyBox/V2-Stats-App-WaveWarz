@@ -15,9 +15,11 @@ import {
   ListOrdered,
   ShieldCheck,
   BarChart3,
-  CalendarDays
+  CalendarDays,
+  Search,
+  Wallet
 } from 'lucide-react';
-import { BattleState, BattleSummary, BattleEvent } from './types';
+import { BattleState, BattleSummary, BattleEvent, TraderProfileStats } from './types';
 import { calculateSettlement, formatSol, formatPct, calculateTVLWinner, calculateLeaderboard, groupBattlesIntoEvents } from './utils';
 import { StatCard } from './components/StatCard';
 import { DistributionChart } from './components/DistributionChart';
@@ -29,15 +31,23 @@ import { Leaderboard } from './components/Leaderboard';
 import { WhaleTicker } from './components/WhaleTicker';
 import { MomentumGauge } from './components/MomentumGauge';
 import { ShareButton } from './components/ShareButton';
+import { TraderProfile } from './components/TraderProfile';
 import { getBattleLibrary } from './data';
-import { fetchBattleOnChain } from './services/solanaService';
+import { fetchBattleOnChain, fetchTraderProfile } from './services/solanaService';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 export default function App() {
   // Navigation State
-  const [currentView, setCurrentView] = useState<'grid' | 'events' | 'dashboard' | 'replay' | 'leaderboard'>('grid');
+  const [currentView, setCurrentView] = useState<'grid' | 'events' | 'dashboard' | 'replay' | 'leaderboard' | 'trader'>('grid');
   const [selectedBattle, setSelectedBattle] = useState<BattleState | null>(null);
   const [selectedEvent, setSelectedEvent] = useState<BattleEvent | null>(null);
+  const [traderStats, setTraderStats] = useState<TraderProfileStats | null>(null);
+  
+  // Search State
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isSearching, setIsSearching] = useState(false);
+  
+  // Loading State
   const [isLoading, setIsLoading] = useState(false);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   
@@ -73,6 +83,34 @@ export default function App() {
     };
   }, [currentView, selectedBattle?.id, selectedBattle?.isEnded]);
 
+  const handleSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!searchQuery) return;
+
+    setIsLoading(true);
+    
+    try {
+      // 1. Check if it's a wallet address (Length 32-44 chars usually)
+      if (searchQuery.length >= 32 && searchQuery.length <= 44) {
+         const stats = await fetchTraderProfile(searchQuery, library);
+         setTraderStats(stats);
+         setCurrentView('trader');
+         setSelectedBattle(null);
+         setSelectedEvent(null);
+      } else {
+        // 2. Filter battles by name (Simple client side filter)
+        // Just alert for now or implement filter view. 
+        // For "Well Oiled Machine", let's filter the grid view.
+        setCurrentView('grid');
+        // We will pass searchQuery to grid filtering
+      }
+    } catch (err) {
+      console.error("Search failed", err);
+      alert("Could not find wallet or data. Please check the address.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleSelectBattle = async (summary: BattleSummary) => {
     setIsLoading(true);
@@ -89,26 +127,23 @@ export default function App() {
 
   const handleSelectEvent = (event: BattleEvent) => {
     setSelectedEvent(event);
-    // Stay in events view but conceptually we are drilling down. 
-    // We will render a specific "Event Detail" state within the events view or switch logic.
-    // For simplicity, let's use a temporary view state or just render conditionally.
   };
 
   const handleBack = () => {
     if (currentView === 'dashboard' || currentView === 'replay') {
-      // Return to where we came from
       if (selectedEvent) {
-        // If we were inside an event, go back to that event's list
         setSelectedBattle(null);
-        // We stay in 'events' view, but selectedEvent is still active, so UI shows the list
         setCurrentView('events');
       } else {
         setCurrentView('grid');
         setSelectedBattle(null);
       }
     } else if (currentView === 'events' && selectedEvent) {
-      // Go back to main events list
       setSelectedEvent(null);
+    } else if (currentView === 'trader') {
+      setCurrentView('grid');
+      setTraderStats(null);
+      setSearchQuery('');
     } else {
       setCurrentView('grid');
     }
@@ -126,22 +161,46 @@ export default function App() {
     { name: battle.artistB.name, value: battle.artistBSolBalance, color: battle.artistB.color },
   ] : [];
 
+  // Filter battles for Grid View based on Search
+  const filteredBattles = useMemo(() => {
+    if (!searchQuery || searchQuery.length > 30) return library; // Ignore wallet addresses
+    return library.filter(b => 
+      b.artistA.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+      b.artistB.name.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+  }, [library, searchQuery]);
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-200 font-sans selection:bg-indigo-500/30">
       {/* Header / Nav */}
       <header className="border-b border-slate-800 bg-slate-950/80 backdrop-blur-md sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
           <div 
-            className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity" 
-            onClick={() => { setCurrentView('grid'); setSelectedEvent(null); setSelectedBattle(null); }}
+            className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity shrink-0" 
+            onClick={() => { setCurrentView('grid'); setSelectedEvent(null); setSelectedBattle(null); setSearchQuery(''); }}
           >
             <Activity className="w-6 h-6 text-indigo-500" />
-            <span className="font-bold text-xl tracking-tight text-white">WaveWarz<span className="text-indigo-500">Analytics</span></span>
+            <span className="font-bold text-xl tracking-tight text-white hidden sm:inline">WaveWarz<span className="text-indigo-500">Analytics</span></span>
+            <span className="font-bold text-xl tracking-tight text-white sm:hidden">WW<span className="text-indigo-500">A</span></span>
+          </div>
+
+          {/* Global Search Bar */}
+          <div className="flex-1 max-w-lg relative group">
+             <form onSubmit={handleSearch} className="relative">
+               <input 
+                 type="text" 
+                 placeholder="Search Artist or Paste Wallet Address..."
+                 className="w-full bg-slate-900 border border-slate-800 rounded-full py-2 pl-10 pr-4 text-sm text-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all placeholder:text-slate-600"
+                 value={searchQuery}
+                 onChange={(e) => setSearchQuery(e.target.value)}
+               />
+               <Search className="absolute left-3 top-2.5 text-slate-500 w-4 h-4 group-focus-within:text-indigo-500 transition-colors" />
+             </form>
           </div>
           
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-4 shrink-0">
             {/* Main Nav Items */}
-            <div className="hidden md:flex bg-slate-900 rounded-lg p-1 border border-slate-800 mr-4">
+            <div className="hidden md:flex bg-slate-900 rounded-lg p-1 border border-slate-800">
               <button 
                 onClick={() => { setCurrentView('grid'); setSelectedBattle(null); setSelectedEvent(null); }}
                 className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${
@@ -187,15 +246,8 @@ export default function App() {
                   }`}
                 >
                   <History size={14} />
-                  {currentView === 'replay' ? 'Exit Replay' : 'Replay History'}
+                  <span className="hidden sm:inline">{currentView === 'replay' ? 'Exit' : 'Replay'}</span>
                 </button>
-                <div className={`hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold uppercase tracking-wide border ${
-                  battle.isEnded 
-                    ? 'bg-slate-800 text-slate-400 border-slate-700' 
-                    : 'bg-green-500/10 text-green-400 border-green-500/30 animate-pulse'
-                }`}>
-                   {battle.isEnded ? 'Battle Ended' : 'Live Now'}
-                </div>
               </>
             )}
           </div>
@@ -219,13 +271,23 @@ export default function App() {
         {isLoading && (
           <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex flex-col items-center justify-center">
             <Loader2 className="w-10 h-10 text-indigo-500 animate-spin mb-4" />
-            <div className="text-slate-300 font-mono">Fetching On-Chain Data...</div>
+            <div className="text-slate-300 font-mono">Crunching Blockchain Data...</div>
+          </div>
+        )}
+
+        {/* VIEW 0: TRADER PROFILE */}
+        {currentView === 'trader' && traderStats && (
+          <div>
+            <button onClick={handleBack} className="flex items-center gap-2 text-slate-500 hover:text-white transition-colors text-sm font-medium mb-6">
+              <ArrowLeft size={16} /> Back to Grid
+            </button>
+            <TraderProfile stats={traderStats} onClose={handleBack} />
           </div>
         )}
 
         {/* VIEW 1: BATTLE GRID (DEFAULT) */}
         {currentView === 'grid' && (
-          <BattleGrid battles={library} onSelect={handleSelectBattle} />
+          <BattleGrid battles={filteredBattles} onSelect={handleSelectBattle} />
         )}
 
         {/* VIEW 2: EVENTS GRID */}
@@ -257,12 +319,7 @@ export default function App() {
                 <Trophy size={18} className="mt-0.5 shrink-0" />
                 <div>
                   <strong className="block mb-1">Winning Condition: Best 2 out of 3</strong>
-                  The winner of the round is determined by winning 2 out of 3 categories: 
-                  <ul className="list-disc list-inside mt-1 space-y-0.5 opacity-80">
-                    <li>Charts (TVL at battle end)</li>
-                    <li>Judges Panel</li>
-                    <li>Audience Poll</li>
-                  </ul>
+                  The winner of the round is determined by winning 2 out of 3 categories: Charts, Judges Panel, and Audience Poll.
                 </div>
              </div>
 

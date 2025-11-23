@@ -1,5 +1,5 @@
 
-import { BattleState, BattleSummary, RecentTrade } from '../types';
+import { BattleState, BattleSummary, RecentTrade, TraderProfileStats, TraderBattleHistory } from '../types';
 import { PublicKey, Connection } from '@solana/web3.js';
 
 // --- CONFIGURATION ---
@@ -224,6 +224,7 @@ async function fetchTransactionStats(battleAddress: string, vaultAddress: string
 
   while (hasMore && fetchedCount < LIMIT) {
     const query = `&limit=50${beforeSignature ? `&before=${beforeSignature}` : ''}`;
+    // Removed type=TRANSFER to catch all interaction types including program calls
     const url = `https://api-mainnet.helius-rpc.com/v0/addresses/${battleAddress}/transactions/?api-key=${HELIUS_API_KEY}${query}`;
     
     const txs = await fetchWithRetry(url);
@@ -288,4 +289,164 @@ async function fetchTransactionStats(battleAddress: string, vaultAddress: string
     uniqueTraders: traders.size,
     recentTrades
   };
+}
+
+// --- 5. TRADER ANALYTICS SERVICE ---
+
+export async function fetchTraderProfile(walletAddress: string, library: BattleSummary[]): Promise<TraderProfileStats> {
+  const allTxs: any[] = [];
+  let beforeSignature = '';
+  let hasMore = true;
+  let page = 0;
+  // Increase depth to ~1000 transactions to ensure we catch battles back to May 2025
+  // or just general heavy activity.
+  const MAX_PAGES = 10; 
+
+  while (hasMore && page < MAX_PAGES) {
+    // Pagination Loop
+    const query = `&limit=100${beforeSignature ? `&before=${beforeSignature}` : ''}`;
+    const url = `https://api-mainnet.helius-rpc.com/v0/addresses/${walletAddress}/transactions/?api-key=${HELIUS_API_KEY}${query}`;
+    
+    try {
+      const batch = await fetchWithRetry(url);
+      
+      if (!batch || batch.length === 0) {
+        hasMore = false;
+        break;
+      }
+
+      allTxs.push(...batch);
+      
+      // Setup next page
+      const lastTx = batch[batch.length - 1];
+      beforeSignature = lastTx.signature;
+      page++;
+
+    } catch (e) {
+      console.error(`Failed to fetch trader history page ${page}`, e);
+      // Stop fetching on error but process what we have
+      hasMore = false; 
+    }
+  }
+
+  const history: TraderBattleHistory[] = [];
+  const battleMap = new Map<string, BattleSummary>();
+  
+  // Pre-compute map of battle vaults/PDAs to battles for quick lookup
+  library.forEach(b => {
+     const pda = deriveBattlePDA(b.battleId).toBase58();
+     const vault = deriveBattleVaultPDA(b.battleId).toBase58();
+     battleMap.set(pda, b);
+     battleMap.set(vault, b);
+  });
+
+  const wavewarzProgramId = PROGRAM_ID.toBase58();
+
+  let totalInvested = 0;
+  let totalPayout = 0;
+  const battlesParticipated = new Set<string>();
+
+  // Process all collected transactions
+  for (const tx of allTxs) {
+    // 1. Detection: Does this transaction involve the WaveWarz Program?
+    const accountKeys = tx.accountData?.map((a: any) => a.account) || [];
+    const involvesProgram = accountKeys.includes(wavewarzProgramId) || 
+                            tx.instructions?.some((ix: any) => ix.programId === wavewarzProgramId);
+
+    if (!tx.nativeTransfers) continue;
+
+    for (const transfer of tx.nativeTransfers) {
+       const amount = transfer.amount / 1_000_000_000;
+       
+       // --- CASE 1: INVESTMENT (User -> Battle) ---
+       if (transfer.fromUserAccount === walletAddress) {
+          const knownBattle = battleMap.get(transfer.toUserAccount);
+          
+          if (knownBattle) {
+             // Known Battle
+             totalInvested += amount;
+             battlesParticipated.add(knownBattle.id);
+             
+             updateHistory(history, knownBattle.id, knownBattle.artistA.name, knownBattle.artistB.name, knownBattle.imageUrl, knownBattle.createdAt, amount, 0);
+          } else if (involvesProgram) {
+             // UNKNOWN / UNLISTED Battle (Dynamic fallback for new battles not in data.ts)
+             // We treat the destination account as the temporary ID
+             const unknownId = `unlisted-${transfer.toUserAccount.slice(0,8)}`;
+             totalInvested += amount;
+             battlesParticipated.add(unknownId);
+
+             updateHistory(history, unknownId, "Unlisted Battle", "Unknown Opponent", "https://via.placeholder.com/150?text=?", new Date(tx.timestamp * 1000).toISOString(), amount, 0);
+          }
+       }
+       
+       // --- CASE 2: PAYOUT (Battle -> User) ---
+       if (transfer.toUserAccount === walletAddress) {
+          const knownBattle = battleMap.get(transfer.fromUserAccount);
+          
+          if (knownBattle) {
+             totalPayout += amount;
+             battlesParticipated.add(knownBattle.id);
+             updateHistory(history, knownBattle.id, knownBattle.artistA.name, knownBattle.artistB.name, knownBattle.imageUrl, knownBattle.createdAt, 0, amount);
+          } else if (involvesProgram) {
+             const unknownId = `unlisted-${transfer.fromUserAccount.slice(0,8)}`;
+             totalPayout += amount;
+             battlesParticipated.add(unknownId);
+             updateHistory(history, unknownId, "Unlisted Battle", "Unknown Opponent", "https://via.placeholder.com/150?text=?", new Date(tx.timestamp * 1000).toISOString(), 0, amount);
+          }
+       }
+    }
+  }
+
+  // Post-process history to set outcomes
+  history.forEach(h => {
+    h.pnl = h.payout - h.invested;
+    if (h.pnl > 0) h.outcome = 'WIN';
+    else if (h.pnl < 0 && h.payout > 0) h.outcome = 'LOSS'; 
+    else if (h.payout === 0) h.outcome = 'PENDING';
+  });
+
+  const wins = history.filter(h => h.outcome === 'WIN').length;
+  const losses = history.filter(h => h.outcome === 'LOSS').length;
+  
+  return {
+    walletAddress,
+    totalInvested,
+    totalPayout,
+    netPnL: totalPayout - totalInvested,
+    battlesParticipated: battlesParticipated.size,
+    wins,
+    losses,
+    winRate: (wins + losses) > 0 ? (wins / (wins + losses)) * 100 : 0,
+    favoriteArtist: "Unknown", 
+    history: history.sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+  };
+}
+
+function updateHistory(
+  history: TraderBattleHistory[], 
+  battleId: string, 
+  nameA: string, 
+  nameB: string, 
+  img: string, 
+  date: string, 
+  invested: number, 
+  payout: number
+) {
+  const existingEntry = history.find(h => h.battleId === battleId);
+  if (existingEntry) {
+    existingEntry.invested += invested;
+    existingEntry.payout += payout;
+  } else {
+     history.push({
+       battleId,
+       artistAName: nameA,
+       artistBName: nameB,
+       imageUrl: img,
+       date: date,
+       invested,
+       payout,
+       pnl: 0,
+       outcome: 'PENDING'
+     });
+  }
 }
