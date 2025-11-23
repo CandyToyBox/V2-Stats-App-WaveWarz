@@ -381,15 +381,16 @@ export async function fetchTraderProfile(walletAddress: string, library: BattleS
           } else if (involvesProgram) {
              // UNKNOWN / UNLISTED Battle (Dynamic fallback for new battles not in data.ts)
              // We treat the destination account as the temporary ID
-             const unknownId = `unlisted-${transfer.toUserAccount.slice(0,8)}`;
+             const unknownId = `unlisted-${transfer.toUserAccount}`;
+             const shortAddr = transfer.toUserAccount.slice(0, 4) + '...' + transfer.toUserAccount.slice(-4);
              totalInvested += amount;
              battlesParticipated.add(unknownId);
 
              updateHistory(
                history, 
                unknownId, 
-               "Unlisted Battle", 
-               "Unknown Opponent", 
+               `Unlisted Battle`, 
+               `Unknown Opponent`, 
                "", // Empty image for unlisted to trigger default icon
                new Date(tx.timestamp * 1000).toISOString(), 
                amount, 
@@ -418,14 +419,15 @@ export async function fetchTraderProfile(walletAddress: string, library: BattleS
                { signature: tx.signature, type: 'PAYOUT', amount, date: new Date(tx.timestamp * 1000).toISOString() }
              );
           } else if (involvesProgram) {
-             const unknownId = `unlisted-${transfer.fromUserAccount.slice(0,8)}`;
+             const unknownId = `unlisted-${transfer.fromUserAccount}`;
+             const shortAddr = transfer.fromUserAccount.slice(0, 4) + '...' + transfer.fromUserAccount.slice(-4);
              totalPayout += amount;
              battlesParticipated.add(unknownId);
              updateHistory(
                history, 
                unknownId, 
-               "Unlisted Battle", 
-               "Unknown Opponent", 
+               `Unlisted Battle`, 
+               `Unknown Opponent`, 
                "", // Empty image
                new Date(tx.timestamp * 1000).toISOString(), 
                0, 
