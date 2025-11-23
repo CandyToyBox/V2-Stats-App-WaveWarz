@@ -1,4 +1,5 @@
 
+
 export interface Artist {
   id: string;
   name: string;
@@ -166,4 +167,56 @@ export interface TraderProfileStats {
   winRate: number;
   favoriteArtist: string;
   history: TraderBattleHistory[];
+}
+
+export interface TraderLeaderboardEntry {
+  walletAddress: string;
+  totalInvested: number;
+  totalPayout: number;
+  netPnL: number;
+  roi: number;
+  battlesParticipated: number;
+  wins: number;
+  losses: number;
+  winRate: number;
+}
+
+// --- ARTIST LEADERBOARD TYPES ---
+
+export interface ArtistBattleRecord {
+  battleId: string;
+  opponentName: string;
+  date: string;
+  result: 'WIN' | 'LOSS';
+  volumeGenerated: number; // Volume on their side
+  tradingFees: number;     // 1% of volume
+  settlementFees: number;  // 5% (win) or 2% (loss) of loser pool
+  totalEarnings: number;
+}
+
+export interface ArtistLeaderboardStats {
+  artistName: string;
+  walletAddress: string;
+  avatar: string;
+  twitter?: string;
+  musicLink?: string;
+
+  // Earnings
+  totalEarningsSol: number;
+  totalEarningsUsd: number;
+  spotifyStreamEquivalents: number;
+
+  // Performance
+  battlesParticipated: number;
+  wins: number;
+  losses: number;
+  winRate: number;
+  
+  // Volume
+  totalVolumeGenerated: number;
+  
+  // Records
+  bestBattleEarnings: number;
+  bestBattleOpponent: string;
+  history: ArtistBattleRecord[];
 }

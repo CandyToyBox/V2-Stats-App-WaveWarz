@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Trophy, 
@@ -17,7 +18,8 @@ import {
   BarChart3,
   CalendarDays,
   Search,
-  Wallet
+  Wallet,
+  Mic2
 } from 'lucide-react';
 import { BattleState, BattleSummary, BattleEvent, TraderProfileStats } from './types';
 import { calculateSettlement, formatSol, formatPct, calculateTVLWinner, calculateLeaderboard, groupBattlesIntoEvents } from './utils';
@@ -28,6 +30,8 @@ import { BattleReplay } from './components/BattleReplay';
 import { BattleGrid } from './components/BattleGrid';
 import { EventGrid } from './components/EventGrid';
 import { Leaderboard } from './components/Leaderboard';
+import { TraderLeaderboard } from './components/TraderLeaderboard';
+import { ArtistLeaderboard } from './components/ArtistLeaderboard';
 import { WhaleTicker } from './components/WhaleTicker';
 import { MomentumGauge } from './components/MomentumGauge';
 import { ShareButton } from './components/ShareButton';
@@ -38,7 +42,9 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 
 
 export default function App() {
   // Navigation State
-  const [currentView, setCurrentView] = useState<'grid' | 'events' | 'dashboard' | 'replay' | 'leaderboard' | 'trader'>('grid');
+  const [currentView, setCurrentView] = useState<'grid' | 'events' | 'dashboard' | 'replay' | 'leaderboard' | 'trader' | 'artistboard'>('grid');
+  const [leaderboardTab, setLeaderboardTab] = useState<'activity' | 'traders'>('activity');
+  
   const [selectedBattle, setSelectedBattle] = useState<BattleState | null>(null);
   const [selectedEvent, setSelectedEvent] = useState<BattleEvent | null>(null);
   const [traderStats, setTraderStats] = useState<TraderProfileStats | null>(null);
@@ -124,6 +130,19 @@ export default function App() {
       setIsLoading(false);
     }
   };
+  
+  const handleSelectTrader = async (wallet: string) => {
+      setIsLoading(true);
+      try {
+         const stats = await fetchTraderProfile(wallet, library);
+         setTraderStats(stats);
+         setCurrentView('trader');
+      } catch(e) {
+          console.error("Failed to fetch trader", e);
+      } finally {
+          setIsLoading(false);
+      }
+  };
 
   const handleSelectEvent = (event: BattleEvent) => {
     setSelectedEvent(event);
@@ -144,6 +163,8 @@ export default function App() {
       setCurrentView('grid');
       setTraderStats(null);
       setSearchQuery('');
+    } else if (currentView === 'artistboard') {
+      setCurrentView('grid');
     } else {
       setCurrentView('grid');
     }
@@ -200,7 +221,7 @@ export default function App() {
           
           <div className="flex items-center gap-4 shrink-0">
             {/* Main Nav Items */}
-            <div className="hidden md:flex bg-slate-900 rounded-lg p-1 border border-slate-800">
+            <div className="hidden lg:flex bg-slate-900 rounded-lg p-1 border border-slate-800">
               <button 
                 onClick={() => { setCurrentView('grid'); setSelectedBattle(null); setSelectedEvent(null); }}
                 className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${
@@ -222,6 +243,16 @@ export default function App() {
                 <CalendarDays size={14} /> Events
               </button>
               <button 
+                onClick={() => { setCurrentView('artistboard'); setSelectedBattle(null); setSelectedEvent(null); }}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${
+                  currentView === 'artistboard'
+                    ? 'bg-slate-800 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Mic2 size={14} /> Artists
+              </button>
+              <button 
                 onClick={() => { setCurrentView('leaderboard'); setSelectedBattle(null); setSelectedEvent(null); }}
                 className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${
                   currentView === 'leaderboard'
@@ -229,9 +260,18 @@ export default function App() {
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                <ListOrdered size={14} /> Leaderboard
+                <ListOrdered size={14} /> Stats
               </button>
             </div>
+            
+            {/* Mobile Nav Trigger (Simplified) */}
+             <button 
+                onClick={() => { setCurrentView('artistboard'); }}
+                className="lg:hidden p-2 bg-slate-900 text-indigo-400 rounded-lg border border-slate-800"
+                title="Artists"
+              >
+                <Mic2 size={18} />
+              </button>
 
             {/* Battle Specific Controls */}
             {(currentView === 'dashboard' || currentView === 'replay') && battle && (
@@ -279,7 +319,7 @@ export default function App() {
         {currentView === 'trader' && traderStats && (
           <div>
             <button onClick={handleBack} className="flex items-center gap-2 text-slate-500 hover:text-white transition-colors text-sm font-medium mb-6">
-              <ArrowLeft size={16} /> Back to Grid
+              <ArrowLeft size={16} /> Back
             </button>
             <TraderProfile stats={traderStats} onClose={handleBack} />
           </div>
@@ -329,7 +369,46 @@ export default function App() {
 
         {/* VIEW 3: LEADERBOARD */}
         {currentView === 'leaderboard' && (
-           <Leaderboard artists={artistStats} totalBattles={library.length} />
+           <div className="space-y-6">
+              <div className="flex items-center justify-between mb-2">
+                 <h2 className="text-2xl font-bold text-white">Platform Statistics</h2>
+                 
+                 {/* Tabs */}
+                 <div className="bg-slate-900 p-1 rounded-lg border border-slate-800 flex gap-1">
+                   <button 
+                     onClick={() => setLeaderboardTab('activity')}
+                     className={`px-4 py-2 rounded-md text-sm font-bold transition-all ${
+                       leaderboardTab === 'activity' 
+                         ? 'bg-slate-800 text-white shadow-sm' 
+                         : 'text-slate-500 hover:text-slate-300'
+                     }`}
+                   >
+                     Activity
+                   </button>
+                   <button 
+                     onClick={() => setLeaderboardTab('traders')}
+                     className={`px-4 py-2 rounded-md text-sm font-bold transition-all ${
+                       leaderboardTab === 'traders' 
+                         ? 'bg-indigo-600 text-white shadow-sm' 
+                         : 'text-slate-500 hover:text-slate-300'
+                     }`}
+                   >
+                     Top Traders
+                   </button>
+                 </div>
+              </div>
+              
+              {leaderboardTab === 'activity' ? (
+                <Leaderboard artists={artistStats} totalBattles={library.length} />
+              ) : (
+                <TraderLeaderboard battles={library} onSelectTrader={handleSelectTrader} />
+              )}
+           </div>
+        )}
+
+        {/* VIEW 3.5: ARTIST LEADERBOARD (NEW) */}
+        {currentView === 'artistboard' && (
+          <ArtistLeaderboard battles={library} />
         )}
 
         {/* VIEW 4: REPLAY */}

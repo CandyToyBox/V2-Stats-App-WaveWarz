@@ -1,5 +1,5 @@
 
-import { BattleState, BattleSummary, RecentTrade, TraderProfileStats, TraderBattleHistory, TraderTransaction } from '../types';
+import { BattleState, BattleSummary, RecentTrade, TraderProfileStats, TraderBattleHistory, TraderTransaction, TraderLeaderboardEntry } from '../types';
 import { PublicKey, Connection } from '@solana/web3.js';
 
 // --- CONFIGURATION ---
@@ -22,13 +22,14 @@ const CACHE_TTL = 30_000; // 30 seconds cache
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 // Rate Limited Fetch Wrapper
-async function fetchWithRetry(url: string, options?: RequestInit, retries = 2, backoff = 500): Promise<any> {
+// INCREASED RETRIES AND BACKOFF
+async function fetchWithRetry(url: string, options?: RequestInit, retries = 4, backoff = 1000): Promise<any> {
   try {
     const response = await fetch(url, options);
     
     if (response.status === 429) {
       if (retries <= 0) throw new Error("Rate limit exceeded");
-      console.warn(`Rate limited. Retrying in ${backoff}ms...`);
+      // console.warn(`Rate limited. Retrying in ${backoff}ms...`);
       await sleep(backoff);
       return fetchWithRetry(url, options, retries - 1, backoff * 2);
     }
@@ -150,7 +151,7 @@ export async function fetchBattleOnChain(summary: BattleSummary, forceRefresh = 
   const accountInfo = await connection.getAccountInfo(battlePda);
   
   if (!accountInfo) {
-    console.warn("Battle Account not found on-chain.");
+    // console.warn("Battle Account not found on-chain.");
     return {
       ...summary,
       battleAddress,
@@ -176,7 +177,7 @@ export async function fetchBattleOnChain(summary: BattleSummary, forceRefresh = 
   try {
     historyStats = await fetchTransactionStats(battleAddress, vaultPda.toBase58(), chainData.artistASolBalance || 0, chainData.artistBSolBalance || 0);
   } catch (e) {
-    console.error("History fetch failed, returning partial data", e);
+    // console.warn("History fetch failed, returning partial data. Error handled.");
     // Return what we have from account data, zeroing out volume to prevent UI errors
   }
 
@@ -206,6 +207,13 @@ export async function fetchBattleOnChain(summary: BattleSummary, forceRefresh = 
 
 // --- 4. TRANSACTION PARSING ---
 
+// Generic fetcher for address transactions to be reused
+async function fetchAddressTransactions(address: string, limit: number = 50, beforeSignature?: string) {
+    const query = `&limit=${limit}${beforeSignature ? `&before=${beforeSignature}` : ''}`;
+    const url = `https://api-mainnet.helius-rpc.com/v0/addresses/${address}/transactions/?api-key=${HELIUS_API_KEY}${query}`;
+    return await fetchWithRetry(url);
+}
+
 async function fetchTransactionStats(battleAddress: string, vaultAddress: string, tvlA: number, tvlB: number) {
   let volumeA = 0;
   let volumeB = 0;
@@ -223,11 +231,7 @@ async function fetchTransactionStats(battleAddress: string, vaultAddress: string
   const ratioA = tvlA / totalTvl;
 
   while (hasMore && fetchedCount < LIMIT) {
-    const query = `&limit=50${beforeSignature ? `&before=${beforeSignature}` : ''}`;
-    // Removed type=TRANSFER to catch all interaction types including program calls
-    const url = `https://api-mainnet.helius-rpc.com/v0/addresses/${battleAddress}/transactions/?api-key=${HELIUS_API_KEY}${query}`;
-    
-    const txs = await fetchWithRetry(url);
+    const txs = await fetchAddressTransactions(battleAddress, 50, beforeSignature);
     
     if (!txs || txs.length === 0) {
       hasMore = false;
@@ -293,13 +297,82 @@ async function fetchTransactionStats(battleAddress: string, vaultAddress: string
 
 // --- 5. TRADER ANALYTICS SERVICE ---
 
+// NEW: Aggregate leaderboard from a batch of battles
+// Returns a Map of raw stats that the UI can merge incrementally
+export async function fetchBatchTraderStats(battles: BattleSummary[]): Promise<Map<string, { invested: number, payout: number, battles: Set<string> }>> {
+    const traderMap = new Map<string, {
+        invested: number;
+        payout: number;
+        battles: Set<string>;
+    }>();
+
+    for (const battle of battles) {
+        const battlePda = deriveBattlePDA(battle.battleId).toBase58();
+        const vaultPda = deriveBattleVaultPDA(battle.battleId).toBase58();
+
+        let beforeSignature = "";
+        let hasMore = true;
+        let fetchedCount = 0;
+        // Limit depth per battle
+        const DEPTH_LIMIT = 50; 
+
+        try {
+            while (hasMore && fetchedCount < DEPTH_LIMIT) {
+                const txs = await fetchAddressTransactions(battlePda, 50, beforeSignature);
+
+                if (!txs || txs.length === 0) {
+                   hasMore = false;
+                   break;
+                }
+
+                for (const tx of txs) {
+                    if (!tx.nativeTransfers) continue;
+
+                    for (const transfer of tx.nativeTransfers) {
+                        const amount = transfer.amount / 1_000_000_000;
+                        let trader = '';
+                        let type: 'INVEST' | 'PAYOUT' | null = null;
+
+                        // INVEST
+                        if (transfer.toUserAccount === vaultPda || transfer.toUserAccount === battlePda) {
+                            trader = transfer.fromUserAccount;
+                            type = 'INVEST';
+                        } 
+                        // PAYOUT
+                        else if (transfer.fromUserAccount === vaultPda || transfer.fromUserAccount === battlePda) {
+                            trader = transfer.toUserAccount;
+                            type = 'PAYOUT';
+                        }
+
+                        if (trader && type) {
+                             if (!traderMap.has(trader)) {
+                                 traderMap.set(trader, { invested: 0, payout: 0, battles: new Set() });
+                             }
+                             const entry = traderMap.get(trader)!;
+                             if (type === 'INVEST') entry.invested += amount;
+                             if (type === 'PAYOUT') entry.payout += amount;
+                             entry.battles.add(battle.id);
+                        }
+                    }
+                    beforeSignature = tx.signature;
+                }
+                fetchedCount += txs.length;
+                if (txs.length < 50) hasMore = false;
+            }
+        } catch (e) {
+            console.warn(`Failed to aggregate battle ${battle.id}`, e);
+        }
+    }
+
+    return traderMap;
+}
+
 export async function fetchTraderProfile(walletAddress: string, library: BattleSummary[]): Promise<TraderProfileStats> {
   const allTxs: any[] = [];
   let beforeSignature = '';
   let hasMore = true;
   let page = 0;
   // Increase depth to ~1000 transactions to ensure we catch battles back to May 2025
-  // or just general heavy activity.
   const MAX_PAGES = 10; 
 
   while (hasMore && page < MAX_PAGES) {
@@ -382,7 +455,6 @@ export async function fetchTraderProfile(walletAddress: string, library: BattleS
              // UNKNOWN / UNLISTED Battle (Dynamic fallback for new battles not in data.ts)
              // We treat the destination account as the temporary ID
              const unknownId = `unlisted-${transfer.toUserAccount}`;
-             const shortAddr = transfer.toUserAccount.slice(0, 4) + '...' + transfer.toUserAccount.slice(-4);
              totalInvested += amount;
              battlesParticipated.add(unknownId);
 
@@ -420,7 +492,6 @@ export async function fetchTraderProfile(walletAddress: string, library: BattleS
              );
           } else if (involvesProgram) {
              const unknownId = `unlisted-${transfer.fromUserAccount}`;
-             const shortAddr = transfer.fromUserAccount.slice(0, 4) + '...' + transfer.fromUserAccount.slice(-4);
              totalPayout += amount;
              battlesParticipated.add(unknownId);
              updateHistory(
