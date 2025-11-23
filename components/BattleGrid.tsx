@@ -1,10 +1,11 @@
+
 import React from 'react';
 import { BattleSummary } from '../types';
 import { BattleCard } from './BattleCard';
 
 interface Props {
   battles: BattleSummary[];
-  onSelect: (summary: BattleSummary) => void;
+  onSelect: (battle: BattleSummary) => void;
 }
 
 export const BattleGrid: React.FC<Props> = ({ battles, onSelect }) => {

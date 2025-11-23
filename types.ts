@@ -28,6 +28,16 @@ export interface BattleSummary {
   communityRoundId?: string;
 }
 
+export interface BattleEvent {
+  id: string; // Derived from the first round's ID
+  date: string;
+  artistA: Artist;
+  artistB: Artist;
+  rounds: BattleSummary[]; // Chronological order
+  imageUrl: string;
+  isCommunityEvent: boolean;
+}
+
 export interface RecentTrade {
   signature: string;
   amount: number;

@@ -1,5 +1,5 @@
 
-import { BattleState, SettlementStats, TraderSimulation, BattleHistoryPoint, ReplayEvent, BattleSummary, ArtistStats } from './types';
+import { BattleState, SettlementStats, TraderSimulation, BattleHistoryPoint, ReplayEvent, BattleSummary, ArtistStats, BattleEvent } from './types';
 
 // Constants defined in the blueprint
 const FEES = {
@@ -15,7 +15,7 @@ const DISTRIBUTION = {
   LOSING_TRADERS: 0.50, // Stays with losing traders (returned value)
 };
 
-export const calculateWinner = (state: BattleState): 'A' | 'B' => {
+export const calculateTVLWinner = (state: BattleState): 'A' | 'B' => {
   return state.artistASolBalance > state.artistBSolBalance ? 'A' : 'B';
 };
 
@@ -28,7 +28,7 @@ export const formatPct = (val: number): string => {
 };
 
 export const calculateSettlement = (state: BattleState): SettlementStats => {
-  const winner = calculateWinner(state);
+  const winner = calculateTVLWinner(state);
   const isAWin = winner === 'A';
   
   const winnerTVL = isAWin ? state.artistASolBalance : state.artistBSolBalance;
@@ -70,7 +70,7 @@ export const calculateSettlement = (state: BattleState): SettlementStats => {
 };
 
 export const calculateTraderRoi = (battleState: BattleState, sim: TraderSimulation) => {
-    const winner = calculateWinner(battleState);
+    const winner = calculateTVLWinner(battleState);
     const isWin = sim.side === winner;
     
     // Simple simulation logic
@@ -175,4 +175,47 @@ export const calculateLeaderboard = (library: BattleSummary[]): ArtistStats[] =>
     });
 
     return Array.from(artistMap.values()).sort((a, b) => b.totalBattles - a.totalBattles);
+};
+
+// --- EVENT GROUPING LOGIC ---
+export const groupBattlesIntoEvents = (battles: BattleSummary[]): BattleEvent[] => {
+  const events: BattleEvent[] = [];
+  
+  // Sort by date ascending first to process rounds in order
+  const sortedBattles = [...battles].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+  sortedBattles.forEach(battle => {
+    // Check if this battle belongs to the latest event processed
+    const lastEvent = events[events.length - 1];
+    
+    if (lastEvent) {
+      // Logic: Same artists, created within 24 hours of the event's first round
+      const sameArtists = 
+        (battle.artistA.name === lastEvent.artistA.name && battle.artistB.name === lastEvent.artistB.name) ||
+        (battle.artistA.name === lastEvent.artistB.name && battle.artistB.name === lastEvent.artistA.name);
+      
+      const eventTime = new Date(lastEvent.date).getTime();
+      const battleTime = new Date(battle.createdAt).getTime();
+      const timeDiffHours = (battleTime - eventTime) / (1000 * 60 * 60);
+
+      if (sameArtists && timeDiffHours < 24) {
+        lastEvent.rounds.push(battle);
+        return;
+      }
+    }
+
+    // New Event
+    events.push({
+      id: battle.id,
+      date: battle.createdAt,
+      artistA: battle.artistA,
+      artistB: battle.artistB,
+      rounds: [battle],
+      imageUrl: battle.imageUrl,
+      isCommunityEvent: !!battle.isCommunityBattle
+    });
+  });
+
+  // Return events sorted by date descending (newest first)
+  return events.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 };

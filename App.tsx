@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Trophy, 
@@ -13,15 +14,17 @@ import {
   LayoutGrid,
   ListOrdered,
   ShieldCheck,
-  BarChart3
+  BarChart3,
+  CalendarDays
 } from 'lucide-react';
-import { BattleState, BattleSummary } from './types';
-import { calculateSettlement, formatSol, formatPct, calculateWinner, calculateLeaderboard } from './utils';
+import { BattleState, BattleSummary, BattleEvent } from './types';
+import { calculateSettlement, formatSol, formatPct, calculateTVLWinner, calculateLeaderboard, groupBattlesIntoEvents } from './utils';
 import { StatCard } from './components/StatCard';
 import { DistributionChart } from './components/DistributionChart';
 import { RoiCalculator } from './components/RoiCalculator';
 import { BattleReplay } from './components/BattleReplay';
 import { BattleGrid } from './components/BattleGrid';
+import { EventGrid } from './components/EventGrid';
 import { Leaderboard } from './components/Leaderboard';
 import { WhaleTicker } from './components/WhaleTicker';
 import { MomentumGauge } from './components/MomentumGauge';
@@ -32,8 +35,9 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 
 
 export default function App() {
   // Navigation State
-  const [currentView, setCurrentView] = useState<'grid' | 'dashboard' | 'replay' | 'leaderboard'>('grid');
+  const [currentView, setCurrentView] = useState<'grid' | 'events' | 'dashboard' | 'replay' | 'leaderboard'>('grid');
   const [selectedBattle, setSelectedBattle] = useState<BattleState | null>(null);
+  const [selectedEvent, setSelectedEvent] = useState<BattleEvent | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   
@@ -45,6 +49,7 @@ export default function App() {
   }, []);
 
   const artistStats = useMemo(() => calculateLeaderboard(library), [library]);
+  const events = useMemo(() => groupBattlesIntoEvents(library), [library]);
 
   // --- POLLING LOGIC ---
   useEffect(() => {
@@ -82,14 +87,36 @@ export default function App() {
     }
   };
 
+  const handleSelectEvent = (event: BattleEvent) => {
+    setSelectedEvent(event);
+    // Stay in events view but conceptually we are drilling down. 
+    // We will render a specific "Event Detail" state within the events view or switch logic.
+    // For simplicity, let's use a temporary view state or just render conditionally.
+  };
+
   const handleBack = () => {
-    setCurrentView('grid');
-    setSelectedBattle(null);
+    if (currentView === 'dashboard' || currentView === 'replay') {
+      // Return to where we came from
+      if (selectedEvent) {
+        // If we were inside an event, go back to that event's list
+        setSelectedBattle(null);
+        // We stay in 'events' view, but selectedEvent is still active, so UI shows the list
+        setCurrentView('events');
+      } else {
+        setCurrentView('grid');
+        setSelectedBattle(null);
+      }
+    } else if (currentView === 'events' && selectedEvent) {
+      // Go back to main events list
+      setSelectedEvent(null);
+    } else {
+      setCurrentView('grid');
+    }
   };
 
   // Render Logic helpers
   const battle = selectedBattle;
-  const winner = battle ? calculateWinner(battle) : 'A';
+  const winner = battle ? calculateTVLWinner(battle) : 'A';
   const settlement = battle ? calculateSettlement(battle) : null;
   const totalVolume = battle ? battle.totalVolumeA + battle.totalVolumeB : 0;
   const totalTVL = battle ? battle.artistASolBalance + battle.artistBSolBalance : 0;
@@ -106,7 +133,7 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <div 
             className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity" 
-            onClick={() => setCurrentView('grid')}
+            onClick={() => { setCurrentView('grid'); setSelectedEvent(null); setSelectedBattle(null); }}
           >
             <Activity className="w-6 h-6 text-indigo-500" />
             <span className="font-bold text-xl tracking-tight text-white">WaveWarz<span className="text-indigo-500">Analytics</span></span>
@@ -116,7 +143,7 @@ export default function App() {
             {/* Main Nav Items */}
             <div className="hidden md:flex bg-slate-900 rounded-lg p-1 border border-slate-800 mr-4">
               <button 
-                onClick={() => { setCurrentView('grid'); setSelectedBattle(null); }}
+                onClick={() => { setCurrentView('grid'); setSelectedBattle(null); setSelectedEvent(null); }}
                 className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${
                   currentView === 'grid'
                     ? 'bg-slate-800 text-white shadow-sm'
@@ -126,7 +153,17 @@ export default function App() {
                 <LayoutGrid size={14} /> Battles
               </button>
               <button 
-                onClick={() => { setCurrentView('leaderboard'); setSelectedBattle(null); }}
+                onClick={() => { setCurrentView('events'); setSelectedBattle(null); }}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${
+                  currentView === 'events'
+                    ? 'bg-slate-800 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <CalendarDays size={14} /> Events
+              </button>
+              <button 
+                onClick={() => { setCurrentView('leaderboard'); setSelectedBattle(null); setSelectedEvent(null); }}
                 className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${
                   currentView === 'leaderboard'
                     ? 'bg-slate-800 text-white shadow-sm'
@@ -138,7 +175,7 @@ export default function App() {
             </div>
 
             {/* Battle Specific Controls */}
-            {currentView !== 'grid' && currentView !== 'leaderboard' && battle && (
+            {(currentView === 'dashboard' || currentView === 'replay') && battle && (
               <>
                 <ShareButton battle={battle} />
                 <button 
@@ -186,29 +223,72 @@ export default function App() {
           </div>
         )}
 
-        {/* VIEW 1: BATTLE GRID */}
+        {/* VIEW 1: BATTLE GRID (DEFAULT) */}
         {currentView === 'grid' && (
           <BattleGrid battles={library} onSelect={handleSelectBattle} />
         )}
 
-        {/* VIEW 2: LEADERBOARD */}
+        {/* VIEW 2: EVENTS GRID */}
+        {currentView === 'events' && !selectedEvent && (
+          <EventGrid events={events} onSelect={handleSelectEvent} />
+        )}
+
+        {/* VIEW 2.5: EVENT DETAIL (Inside Events Tab) */}
+        {currentView === 'events' && selectedEvent && (
+          <div className="space-y-6 animate-in slide-in-from-right-4 duration-300">
+             <div className="flex items-center gap-4">
+                <button 
+                  onClick={() => setSelectedEvent(null)}
+                  className="p-2 bg-slate-900 border border-slate-800 rounded-lg hover:bg-slate-800 transition-colors"
+                >
+                  <ArrowLeft size={20} className="text-slate-400" />
+                </button>
+                <div>
+                  <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+                    {selectedEvent.artistA.name} <span className="text-slate-500 text-lg">vs</span> {selectedEvent.artistB.name}
+                  </h2>
+                  <div className="text-slate-400 text-sm">
+                    {selectedEvent.rounds.length} Rounds • {new Date(selectedEvent.date).toLocaleDateString()}
+                  </div>
+                </div>
+             </div>
+             
+             <div className="p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-xl text-sm text-indigo-300 flex items-start gap-3">
+                <Trophy size={18} className="mt-0.5 shrink-0" />
+                <div>
+                  <strong className="block mb-1">Winning Condition: Best 2 out of 3</strong>
+                  The winner of the round is determined by winning 2 out of 3 categories: 
+                  <ul className="list-disc list-inside mt-1 space-y-0.5 opacity-80">
+                    <li>Charts (TVL at battle end)</li>
+                    <li>Judges Panel</li>
+                    <li>Audience Poll</li>
+                  </ul>
+                </div>
+             </div>
+
+             <BattleGrid battles={selectedEvent.rounds} onSelect={handleSelectBattle} />
+          </div>
+        )}
+
+        {/* VIEW 3: LEADERBOARD */}
         {currentView === 'leaderboard' && (
            <Leaderboard artists={artistStats} totalBattles={library.length} />
         )}
 
-        {/* VIEW 3: REPLAY */}
+        {/* VIEW 4: REPLAY */}
         {currentView === 'replay' && battle && (
           <BattleReplay battle={battle} onExit={() => setCurrentView('dashboard')} />
         )}
 
-        {/* VIEW 4: DASHBOARD */}
+        {/* VIEW 5: DASHBOARD */}
         {currentView === 'dashboard' && battle && settlement && (
           <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
             
             {/* Back Button & Chain Status */}
             <div className="flex justify-between items-center">
               <button onClick={handleBack} className="flex items-center gap-2 text-slate-500 hover:text-white transition-colors text-sm font-medium">
-                <ArrowLeft size={16} /> Back to Archive
+                <ArrowLeft size={16} /> 
+                {selectedEvent ? 'Back to Event' : 'Back to Archive'}
               </button>
 
               <div className="flex gap-2">
@@ -244,7 +324,11 @@ export default function App() {
                   {/* Artist A */}
                   <div className={`flex flex-col items-center text-center transition-all duration-500 ${winner === 'A' && battle.isEnded ? 'scale-110 drop-shadow-[0_0_15px_rgba(6,182,212,0.5)]' : 'opacity-80'}`}>
                     <div className="w-24 h-24 rounded-full p-1 border-2 border-cyan-500 mb-4 overflow-hidden shadow-lg shadow-cyan-900/20 bg-slate-950">
-                      <div className="w-full h-full bg-cyan-900/20 flex items-center justify-center text-cyan-500 font-bold text-2xl">A</div>
+                      {battle.artistA.avatar ? (
+                        <img src={battle.artistA.avatar} alt="A" className="w-full h-full object-cover rounded-full" />
+                      ) : (
+                        <div className="w-full h-full bg-cyan-900/20 flex items-center justify-center text-cyan-500 font-bold text-2xl">A</div>
+                      )}
                     </div>
                     <h2 className="text-2xl font-bold text-white">{battle.artistA.name}</h2>
                     <div className="mt-2 text-3xl font-mono font-bold text-cyan-400">{formatSol(battle.artistASolBalance)}</div>
@@ -268,7 +352,7 @@ export default function App() {
                     {battle.isEnded ? (
                       <div className="flex flex-col items-center animate-in zoom-in duration-300">
                         <Trophy className="w-12 h-12 text-yellow-400 mb-2 drop-shadow-lg" />
-                        <span className="text-yellow-400 font-bold tracking-widest uppercase">Winner</span>
+                        <span className="text-yellow-400 font-bold tracking-widest uppercase">Chart Winner</span>
                         <span className="text-white font-bold text-lg mt-1 text-center max-w-[200px]">{winner === 'A' ? battle.artistA.name : battle.artistB.name}</span>
                         <span className="text-slate-500 text-sm mt-2">Margin: {formatSol(settlement.winMargin)}</span>
                       </div>
@@ -286,7 +370,11 @@ export default function App() {
                   {/* Artist B */}
                   <div className={`flex flex-col items-center text-center transition-all duration-500 ${winner === 'B' && battle.isEnded ? 'scale-110 drop-shadow-[0_0_15px_rgba(232,121,249,0.5)]' : 'opacity-80'}`}>
                     <div className="w-24 h-24 rounded-full p-1 border-2 border-fuchsia-500 mb-4 overflow-hidden shadow-lg shadow-fuchsia-900/20 bg-slate-950">
-                      <div className="w-full h-full bg-fuchsia-900/20 flex items-center justify-center text-fuchsia-500 font-bold text-2xl">B</div>
+                       {battle.artistB.avatar ? (
+                        <img src={battle.artistB.avatar} alt="B" className="w-full h-full object-cover rounded-full" />
+                      ) : (
+                        <div className="w-full h-full bg-fuchsia-900/20 flex items-center justify-center text-fuchsia-500 font-bold text-2xl">B</div>
+                      )}
                     </div>
                     <h2 className="text-2xl font-bold text-white">{battle.artistB.name}</h2>
                     <div className="mt-2 text-3xl font-mono font-bold text-fuchsia-400">{formatSol(battle.artistBSolBalance)}</div>
@@ -357,7 +445,6 @@ export default function App() {
                     </span>
                   </div>
                   
-                  {/* Changed from items-center to default (stretch/top) to fix Recharts width calculation */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                     <DistributionChart settlement={settlement} />
                     
@@ -390,7 +477,7 @@ export default function App() {
 
                 {/* Trading Volume Chart */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 h-80 flex flex-col">
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 h-80 flex flex-col min-w-0">
                     <h3 className="text-lg font-bold text-white mb-6">Current TVL Comparison</h3>
                     <div className="flex-1 w-full min-h-0 min-w-0">
                       <ResponsiveContainer width="100%" height="100%">
