@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
+
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Trophy, 
   Activity, 
@@ -24,6 +25,9 @@ import { RoiCalculator } from './components/RoiCalculator';
 import { BattleReplay } from './components/BattleReplay';
 import { BattleGrid } from './components/BattleGrid';
 import { Leaderboard } from './components/Leaderboard';
+import { WhaleTicker } from './components/WhaleTicker';
+import { MomentumGauge } from './components/MomentumGauge';
+import { ShareButton } from './components/ShareButton';
 import { getBattleLibrary } from './data';
 import { fetchBattleOnChain } from './services/solanaService';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
@@ -33,6 +37,7 @@ export default function App() {
   const [currentView, setCurrentView] = useState<'grid' | 'dashboard' | 'replay' | 'leaderboard'>('grid');
   const [selectedBattle, setSelectedBattle] = useState<BattleState | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   
   // Data
   const [library, setLibrary] = useState<BattleSummary[]>([]);
@@ -43,10 +48,32 @@ export default function App() {
 
   const artistStats = useMemo(() => calculateLeaderboard(library), [library]);
 
+  // --- POLLING LOGIC ---
+  useEffect(() => {
+    // Clear existing poll on change
+    if (pollingRef.current) clearInterval(pollingRef.current);
+
+    if (currentView === 'dashboard' && selectedBattle && !selectedBattle.isEnded) {
+       pollingRef.current = setInterval(async () => {
+         try {
+           // Silent refresh
+           const freshData = await fetchBattleOnChain(selectedBattle, true);
+           setSelectedBattle(freshData);
+         } catch (e) {
+           console.warn("Silent refresh failed", e);
+         }
+       }, 15000); // 15 seconds
+    }
+
+    return () => {
+      if (pollingRef.current) clearInterval(pollingRef.current);
+    };
+  }, [currentView, selectedBattle?.id, selectedBattle?.isEnded]);
+
+
   const handleSelectBattle = async (summary: BattleSummary) => {
     setIsLoading(true);
     try {
-      // Simulate fetching from blockchain
       const fullData = await fetchBattleOnChain(summary);
       setSelectedBattle(fullData);
       setCurrentView('dashboard');
@@ -115,6 +142,7 @@ export default function App() {
             {/* Battle Specific Controls */}
             {currentView !== 'grid' && currentView !== 'leaderboard' && battle && (
               <>
+                <ShareButton battle={battle} />
                 <button 
                   onClick={() => setCurrentView(currentView === 'replay' ? 'dashboard' : 'replay')}
                   className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
@@ -137,6 +165,17 @@ export default function App() {
             )}
           </div>
         </div>
+        
+        {/* WHALE TICKER - Visible only in Dashboard/Replay */}
+        {currentView === 'dashboard' && battle && battle.recentTrades.length > 0 && (
+          <WhaleTicker 
+            trades={battle.recentTrades} 
+            artistAName={battle.artistA.name}
+            artistBName={battle.artistB.name}
+            colorA={battle.artistA.color}
+            colorB={battle.artistB.color}
+          />
+        )}
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
@@ -219,10 +258,10 @@ export default function App() {
                       </div>
                     ) : (
                       <div className="flex flex-col items-center w-full max-w-xs">
-                        <div className="text-slate-500 font-mono text-sm mb-2">{formatPct(battle.artistASolBalance / totalTVL * 100)} vs {formatPct(battle.artistBSolBalance / totalTVL * 100)}</div>
+                        <div className="text-slate-500 font-mono text-sm mb-2">{formatPct(battle.artistASolBalance / (totalTVL || 1) * 100)} vs {formatPct(battle.artistBSolBalance / (totalTVL || 1) * 100)}</div>
                         <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden flex">
-                          <div className="h-full bg-cyan-500 transition-all duration-500" style={{ width: `${(battle.artistASolBalance / totalTVL) * 100}%` }}></div>
-                          <div className="h-full bg-fuchsia-500 transition-all duration-500" style={{ width: `${(battle.artistBSolBalance / totalTVL) * 100}%` }}></div>
+                          <div className="h-full bg-cyan-500 transition-all duration-500" style={{ width: `${(battle.artistASolBalance / (totalTVL || 1)) * 100}%` }}></div>
+                          <div className="h-full bg-fuchsia-500 transition-all duration-500" style={{ width: `${(battle.artistBSolBalance / (totalTVL || 1)) * 100}%` }}></div>
                         </div>
                       </div>
                     )}
@@ -271,14 +310,14 @@ export default function App() {
                <StatCard 
                 label="Artist A Volume" 
                 value={formatSol(battle.totalVolumeA)} 
-                subValue="58% Dominance" 
+                subValue="Estimated" 
                 icon={<Activity size={20} />} 
                 colorClass="text-cyan-400"
               />
                <StatCard 
                 label="Artist B Volume" 
                 value={formatSol(battle.totalVolumeB)} 
-                subValue="42% Dominance" 
+                subValue="Estimated" 
                 icon={<Activity size={20} />} 
                 colorClass="text-fuchsia-400"
               />
@@ -333,24 +372,36 @@ export default function App() {
                 </div>
 
                 {/* Trading Volume Chart */}
-                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 h-80">
-                   <h3 className="text-lg font-bold text-white mb-6">Current TVL Comparison</h3>
-                   <ResponsiveContainer width="100%" height="80%">
-                    <BarChart data={tvlData} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-                      <XAxis type="number" hide />
-                      <YAxis type="category" dataKey="name" width={100} stroke="#94a3b8" fontSize={12} />
-                      <Tooltip 
-                        cursor={{fill: 'rgba(255,255,255,0.05)'}}
-                        contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f8fafc' }}
-                        formatter={(value: number) => formatSol(value)}
-                      />
-                      <Bar dataKey="value" radius={[0, 4, 4, 0]}>
-                        {tvlData.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={entry.color} />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 h-80">
+                    <h3 className="text-lg font-bold text-white mb-6">Current TVL Comparison</h3>
+                    <ResponsiveContainer width="100%" height="80%">
+                      <BarChart data={tvlData} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                        <XAxis type="number" hide />
+                        <YAxis type="category" dataKey="name" width={100} stroke="#94a3b8" fontSize={12} />
+                        <Tooltip 
+                          cursor={{fill: 'rgba(255,255,255,0.05)'}}
+                          contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f8fafc' }}
+                          formatter={(value: number) => formatSol(value)}
+                        />
+                        <Bar dataKey="value" radius={[0, 4, 4, 0]}>
+                          {tvlData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={entry.color} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                  
+                  {/* Momentum Gauge */}
+                  <MomentumGauge 
+                    volA={battle.totalVolumeA} 
+                    volB={battle.totalVolumeB} 
+                    nameA={battle.artistA.name} 
+                    nameB={battle.artistB.name} 
+                    colorA={battle.artistA.color} 
+                    colorB={battle.artistB.color} 
+                  />
                 </div>
               </div>
 
@@ -386,3 +437,4 @@ export default function App() {
     </div>
   );
 }
+    

@@ -1,3 +1,4 @@
+
 export interface Artist {
   id: string;
   name: string;
@@ -27,6 +28,15 @@ export interface BattleSummary {
   communityRoundId?: string;
 }
 
+export interface RecentTrade {
+  signature: string;
+  amount: number;
+  artistId: 'A' | 'B' | 'Unknown';
+  type: 'BUY' | 'SELL';
+  timestamp: number;
+  trader: string;
+}
+
 export interface BattleState extends BattleSummary {
   startTime: number;
   endTime: number;
@@ -43,6 +53,9 @@ export interface BattleState extends BattleSummary {
   totalVolumeB: number;
   tradeCount: number;
   uniqueTraders: number;
+  
+  // New: List of actual trades for the ticker
+  recentTrades: RecentTrade[];
 }
 
 export interface BattleHistoryPoint {
