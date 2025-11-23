@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WaveWarz Analytics</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+  <script type="importmap">
+{
+  "imports": {
+    "react": "https://aistudiocdn.com/react@^19.2.0",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+    "react/": "https://aistudiocdn.com/react@^19.2.0/",
+    "recharts": "https://aistudiocdn.com/recharts@^3.4.1",
+    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.554.0",
+    "@solana/web3.js": "https://esm.sh/@solana/web3.js@1.95.3",
+    "buffer": "https://esm.sh/buffer@6.0.3"
+  }
+}
+</script>
+<!-- Polyfill Buffer globally as some Solana web3 internals may rely on it -->
+<script type="module">
+  import { Buffer } from 'buffer';
+  window.Buffer = Buffer;
+</script>
+</head>
+  <body class="bg-slate-950 text-slate-100 antialiased">
+    <div id="root"></div>
+  </body>
+</html>

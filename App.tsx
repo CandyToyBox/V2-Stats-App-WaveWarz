@@ -1,0 +1,388 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import { 
+  Trophy, 
+  Activity, 
+  TrendingUp, 
+  DollarSign, 
+  PlayCircle,
+  StopCircle,
+  BarChart3,
+  History,
+  ArrowLeft,
+  Loader2,
+  Music,
+  Twitter,
+  ExternalLink,
+  LayoutGrid,
+  ListOrdered
+} from 'lucide-react';
+import { BattleState, BattleSummary } from './types';
+import { calculateSettlement, formatSol, formatPct, calculateWinner, calculateLeaderboard } from './utils';
+import { StatCard } from './components/StatCard';
+import { DistributionChart } from './components/DistributionChart';
+import { RoiCalculator } from './components/RoiCalculator';
+import { BattleReplay } from './components/BattleReplay';
+import { BattleGrid } from './components/BattleGrid';
+import { Leaderboard } from './components/Leaderboard';
+import { getBattleLibrary } from './data';
+import { fetchBattleOnChain } from './services/solanaService';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+
+export default function App() {
+  // Navigation State
+  const [currentView, setCurrentView] = useState<'grid' | 'dashboard' | 'replay' | 'leaderboard'>('grid');
+  const [selectedBattle, setSelectedBattle] = useState<BattleState | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  
+  // Data
+  const [library, setLibrary] = useState<BattleSummary[]>([]);
+
+  useEffect(() => {
+    setLibrary(getBattleLibrary());
+  }, []);
+
+  const artistStats = useMemo(() => calculateLeaderboard(library), [library]);
+
+  const handleSelectBattle = async (summary: BattleSummary) => {
+    setIsLoading(true);
+    try {
+      // Simulate fetching from blockchain
+      const fullData = await fetchBattleOnChain(summary);
+      setSelectedBattle(fullData);
+      setCurrentView('dashboard');
+    } catch (e) {
+      console.error("Failed to fetch battle data", e);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleBack = () => {
+    setCurrentView('grid');
+    setSelectedBattle(null);
+  };
+
+  // Render Logic helpers
+  const battle = selectedBattle;
+  const winner = battle ? calculateWinner(battle) : 'A';
+  const settlement = battle ? calculateSettlement(battle) : null;
+  const totalVolume = battle ? battle.totalVolumeA + battle.totalVolumeB : 0;
+  const totalTVL = battle ? battle.artistASolBalance + battle.artistBSolBalance : 0;
+
+  const tvlData = battle ? [
+    { name: battle.artistA.name, value: battle.artistASolBalance, color: battle.artistA.color },
+    { name: battle.artistB.name, value: battle.artistBSolBalance, color: battle.artistB.color },
+  ] : [];
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-200 font-sans selection:bg-indigo-500/30">
+      {/* Header / Nav */}
+      <header className="border-b border-slate-800 bg-slate-950/80 backdrop-blur-md sticky top-0 z-50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+          <div 
+            className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity" 
+            onClick={() => setCurrentView('grid')}
+          >
+            <Activity className="w-6 h-6 text-indigo-500" />
+            <span className="font-bold text-xl tracking-tight text-white">WaveWarz<span className="text-indigo-500">Analytics</span></span>
+          </div>
+          
+          <div className="flex items-center gap-4">
+            {/* Main Nav Items */}
+            <div className="hidden md:flex bg-slate-900 rounded-lg p-1 border border-slate-800 mr-4">
+              <button 
+                onClick={() => { setCurrentView('grid'); setSelectedBattle(null); }}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${
+                  currentView === 'grid'
+                    ? 'bg-slate-800 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <LayoutGrid size={14} /> Battles
+              </button>
+              <button 
+                onClick={() => { setCurrentView('leaderboard'); setSelectedBattle(null); }}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${
+                  currentView === 'leaderboard'
+                    ? 'bg-slate-800 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <ListOrdered size={14} /> Leaderboard
+              </button>
+            </div>
+
+            {/* Battle Specific Controls */}
+            {currentView !== 'grid' && currentView !== 'leaderboard' && battle && (
+              <>
+                <button 
+                  onClick={() => setCurrentView(currentView === 'replay' ? 'dashboard' : 'replay')}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
+                    currentView === 'replay' 
+                      ? 'bg-indigo-500 text-white border-indigo-500' 
+                      : 'bg-indigo-500/10 text-indigo-400 border-indigo-500/30 hover:bg-indigo-500/20'
+                  }`}
+                >
+                  <History size={14} />
+                  {currentView === 'replay' ? 'Exit Replay' : 'Replay History'}
+                </button>
+                <div className={`hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold uppercase tracking-wide border ${
+                  battle.isEnded 
+                    ? 'bg-slate-800 text-slate-400 border-slate-700' 
+                    : 'bg-green-500/10 text-green-400 border-green-500/30 animate-pulse'
+                }`}>
+                   {battle.isEnded ? 'Battle Ended' : 'Live Now'}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      </header>
+
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+        
+        {/* Loading Overlay */}
+        {isLoading && (
+          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex flex-col items-center justify-center">
+            <Loader2 className="w-10 h-10 text-indigo-500 animate-spin mb-4" />
+            <div className="text-slate-300 font-mono">Fetching On-Chain Data...</div>
+          </div>
+        )}
+
+        {/* VIEW 1: BATTLE GRID */}
+        {currentView === 'grid' && (
+          <BattleGrid battles={library} onSelect={handleSelectBattle} />
+        )}
+
+        {/* VIEW 2: LEADERBOARD */}
+        {currentView === 'leaderboard' && (
+           <Leaderboard artists={artistStats} totalBattles={library.length} />
+        )}
+
+        {/* VIEW 3: REPLAY */}
+        {currentView === 'replay' && battle && (
+          <BattleReplay battle={battle} onExit={() => setCurrentView('dashboard')} />
+        )}
+
+        {/* VIEW 4: DASHBOARD */}
+        {currentView === 'dashboard' && battle && settlement && (
+          <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            
+            {/* Back Button */}
+            <button onClick={handleBack} className="flex items-center gap-2 text-slate-500 hover:text-white transition-colors text-sm font-medium">
+              <ArrowLeft size={16} /> Back to Archive
+            </button>
+
+            {/* Battle Hero Section */}
+            <section className="relative overflow-hidden rounded-3xl border border-slate-800 bg-slate-900/50 p-8 md:p-12">
+               {/* Background Image & Overlay */}
+               <div className="absolute inset-0 z-0">
+                 <img src={battle.imageUrl} alt="Battle Background" className="w-full h-full object-cover opacity-20 blur-sm" />
+                 <div className="absolute inset-0 bg-gradient-to-b from-slate-900/80 to-slate-900"></div>
+               </div>
+
+               {/* Background Glow */}
+               <div className="absolute top-0 left-1/4 w-96 h-96 bg-cyan-500/10 rounded-full blur-3xl -translate-y-1/2 pointer-events-none z-0"></div>
+               <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-fuchsia-500/10 rounded-full blur-3xl translate-y-1/2 pointer-events-none z-0"></div>
+
+               <div className="relative z-10 flex flex-col md:flex-row items-center justify-between gap-8 md:gap-16">
+                  {/* Artist A */}
+                  <div className={`flex flex-col items-center text-center transition-all duration-500 ${winner === 'A' && battle.isEnded ? 'scale-110 drop-shadow-[0_0_15px_rgba(6,182,212,0.5)]' : 'opacity-80'}`}>
+                    <div className="w-24 h-24 rounded-full p-1 border-2 border-cyan-500 mb-4 overflow-hidden shadow-lg shadow-cyan-900/20 bg-slate-950">
+                      <div className="w-full h-full bg-cyan-900/20 flex items-center justify-center text-cyan-500 font-bold text-2xl">A</div>
+                    </div>
+                    <h2 className="text-2xl font-bold text-white">{battle.artistA.name}</h2>
+                    <div className="mt-2 text-3xl font-mono font-bold text-cyan-400">{formatSol(battle.artistASolBalance)}</div>
+                    <div className="text-xs text-cyan-500/70 uppercase tracking-widest mt-1">Total Value Locked</div>
+                    <div className="flex gap-2 mt-3">
+                      {battle.artistA.twitter && (
+                        <a href={`https://twitter.com/${battle.artistA.twitter}`} target="_blank" rel="noreferrer" className="p-2 bg-slate-800 rounded-full hover:bg-sky-500 hover:text-white transition-colors text-slate-400">
+                          <Twitter size={14} />
+                        </a>
+                      )}
+                      {battle.artistA.musicLink && (
+                        <a href={battle.artistA.musicLink} target="_blank" rel="noreferrer" className="p-2 bg-slate-800 rounded-full hover:bg-cyan-500 hover:text-white transition-colors text-slate-400">
+                          <Music size={14} />
+                        </a>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* VS / Result */}
+                  <div className="flex flex-col items-center">
+                    {battle.isEnded ? (
+                      <div className="flex flex-col items-center animate-in zoom-in duration-300">
+                        <Trophy className="w-12 h-12 text-yellow-400 mb-2 drop-shadow-lg" />
+                        <span className="text-yellow-400 font-bold tracking-widest uppercase">Winner</span>
+                        <span className="text-white font-bold text-lg mt-1 text-center max-w-[200px]">{winner === 'A' ? battle.artistA.name : battle.artistB.name}</span>
+                        <span className="text-slate-500 text-sm mt-2">Margin: {formatSol(settlement.winMargin)}</span>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center w-full max-w-xs">
+                        <div className="text-slate-500 font-mono text-sm mb-2">{formatPct(battle.artistASolBalance / totalTVL * 100)} vs {formatPct(battle.artistBSolBalance / totalTVL * 100)}</div>
+                        <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden flex">
+                          <div className="h-full bg-cyan-500 transition-all duration-500" style={{ width: `${(battle.artistASolBalance / totalTVL) * 100}%` }}></div>
+                          <div className="h-full bg-fuchsia-500 transition-all duration-500" style={{ width: `${(battle.artistBSolBalance / totalTVL) * 100}%` }}></div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Artist B */}
+                  <div className={`flex flex-col items-center text-center transition-all duration-500 ${winner === 'B' && battle.isEnded ? 'scale-110 drop-shadow-[0_0_15px_rgba(232,121,249,0.5)]' : 'opacity-80'}`}>
+                    <div className="w-24 h-24 rounded-full p-1 border-2 border-fuchsia-500 mb-4 overflow-hidden shadow-lg shadow-fuchsia-900/20 bg-slate-950">
+                      <div className="w-full h-full bg-fuchsia-900/20 flex items-center justify-center text-fuchsia-500 font-bold text-2xl">B</div>
+                    </div>
+                    <h2 className="text-2xl font-bold text-white">{battle.artistB.name}</h2>
+                    <div className="mt-2 text-3xl font-mono font-bold text-fuchsia-400">{formatSol(battle.artistBSolBalance)}</div>
+                    <div className="text-xs text-fuchsia-500/70 uppercase tracking-widest mt-1">Total Value Locked</div>
+                    <div className="flex gap-2 mt-3">
+                      {battle.artistB.twitter && (
+                        <a href={`https://twitter.com/${battle.artistB.twitter}`} target="_blank" rel="noreferrer" className="p-2 bg-slate-800 rounded-full hover:bg-sky-500 hover:text-white transition-colors text-slate-400">
+                          <Twitter size={14} />
+                        </a>
+                      )}
+                      {battle.artistB.musicLink && (
+                        <a href={battle.artistB.musicLink} target="_blank" rel="noreferrer" className="p-2 bg-slate-800 rounded-full hover:bg-fuchsia-500 hover:text-white transition-colors text-slate-400">
+                          <Music size={14} />
+                        </a>
+                      )}
+                    </div>
+                  </div>
+               </div>
+            </section>
+
+            {/* Core Stats Grid */}
+            <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <StatCard 
+                label="Total Volume" 
+                value={formatSol(totalVolume)} 
+                subValue="Lifetime traded" 
+                icon={<BarChart3 size={20} />} 
+                colorClass="text-indigo-400"
+              />
+              <StatCard 
+                label="Total Trades" 
+                value={battle.tradeCount.toString()} 
+                subValue={`${battle.uniqueTraders} Unique Wallets`} 
+                icon={<TrendingUp size={20} />} 
+                colorClass="text-emerald-400"
+              />
+               <StatCard 
+                label="Artist A Volume" 
+                value={formatSol(battle.totalVolumeA)} 
+                subValue="58% Dominance" 
+                icon={<Activity size={20} />} 
+                colorClass="text-cyan-400"
+              />
+               <StatCard 
+                label="Artist B Volume" 
+                value={formatSol(battle.totalVolumeB)} 
+                subValue="42% Dominance" 
+                icon={<Activity size={20} />} 
+                colorClass="text-fuchsia-400"
+              />
+            </section>
+
+            {/* Detailed Analysis & Calculator */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              
+              {/* Left Column: Settlement & Distribution */}
+              <div className="lg:col-span-2 space-y-8">
+                
+                {/* Prize Pool Breakdown */}
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+                  <div className="flex justify-between items-center mb-6">
+                    <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                      <DollarSign className="w-5 h-5 text-green-500" />
+                      Loser's Pool Distribution
+                    </h3>
+                    <span className="text-sm text-slate-400 bg-slate-950 px-3 py-1 rounded-lg border border-slate-800">
+                      Total: {formatSol(settlement.loserPoolTotal)}
+                    </span>
+                  </div>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
+                    <DistributionChart settlement={settlement} />
+                    
+                    <div className="space-y-4">
+                      <div className="p-4 bg-slate-950/50 rounded-xl border-l-4 border-green-500">
+                        <div className="flex justify-between items-center">
+                          <span className="text-slate-400 text-sm">Winning Traders (40%)</span>
+                          <span className="text-green-400 font-bold font-mono">{formatSol(settlement.toWinningTraders)}</span>
+                        </div>
+                      </div>
+                      <div className="p-4 bg-slate-950/50 rounded-xl border-l-4 border-red-500">
+                        <div className="flex justify-between items-center">
+                          <span className="text-slate-400 text-sm">Losing Traders (50% Retained)</span>
+                          <span className="text-red-400 font-bold font-mono">{formatSol(settlement.toLosingTraders)}</span>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="p-3 bg-slate-950/50 rounded-xl border-l-4 border-fuchsia-500">
+                          <div className="text-slate-500 text-xs mb-1">Win Artist (5%)</div>
+                          <div className="text-fuchsia-300 font-mono text-sm">{formatSol(settlement.toWinningArtist)}</div>
+                        </div>
+                        <div className="p-3 bg-slate-950/50 rounded-xl border-l-4 border-blue-500">
+                          <div className="text-slate-500 text-xs mb-1">Platform (3%)</div>
+                          <div className="text-blue-300 font-mono text-sm">{formatSol(settlement.toPlatform)}</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Trading Volume Chart */}
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 h-80">
+                   <h3 className="text-lg font-bold text-white mb-6">Current TVL Comparison</h3>
+                   <ResponsiveContainer width="100%" height="80%">
+                    <BarChart data={tvlData} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                      <XAxis type="number" hide />
+                      <YAxis type="category" dataKey="name" width={100} stroke="#94a3b8" fontSize={12} />
+                      <Tooltip 
+                        cursor={{fill: 'rgba(255,255,255,0.05)'}}
+                        contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f8fafc' }}
+                        formatter={(value: number) => formatSol(value)}
+                      />
+                      <Bar dataKey="value" radius={[0, 4, 4, 0]}>
+                        {tvlData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              {/* Right Column: Calculator & Fees */}
+              <div className="space-y-8">
+                <RoiCalculator battleState={battle} />
+
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+                   <h3 className="text-lg font-bold text-white mb-4">Total Fee Revenue</h3>
+                   <div className="space-y-4">
+                      <div className="flex justify-between items-center py-2 border-b border-slate-800">
+                        <span className="text-slate-400 text-sm">Artist A Earned</span>
+                        <span className="text-cyan-400 font-mono">{formatSol(settlement.artistAEarnings)}</span>
+                      </div>
+                      <div className="flex justify-between items-center py-2 border-b border-slate-800">
+                        <span className="text-slate-400 text-sm">Artist B Earned</span>
+                        <span className="text-fuchsia-400 font-mono">{formatSol(settlement.artistBEarnings)}</span>
+                      </div>
+                      <div className="flex justify-between items-center py-2">
+                        <span className="text-slate-400 text-sm">Platform Revenue</span>
+                        <span className="text-indigo-400 font-mono">{formatSol(settlement.platformEarnings)}</span>
+                      </div>
+                   </div>
+                   <div className="mt-4 p-3 bg-indigo-500/10 rounded-lg text-xs text-indigo-300 leading-relaxed">
+                     Fees are calculated from 1% volume + settlement bonuses.
+                   </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}

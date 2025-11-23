@@ -1,0 +1,97 @@
+export interface Artist {
+  id: string;
+  name: string;
+  color: string;
+  avatar: string; // From image_url or generated
+  wallet: string;
+  mint?: string;
+  twitter?: string;
+  musicLink?: string;
+}
+
+export interface BattleSummary {
+  id: string; // The UUID
+  battleId: string; // The numeric ID (174...)
+  createdAt: string;
+  status: string;
+  artistA: Artist;
+  artistB: Artist;
+  battleDuration: number;
+  winnerDecided: boolean;
+  imageUrl: string;
+  streamLink?: string;
+  
+  // New fields from updated CSV
+  creatorWallet?: string;
+  isCommunityBattle?: boolean;
+  communityRoundId?: string;
+}
+
+export interface BattleState extends BattleSummary {
+  startTime: number;
+  endTime: number;
+  isEnded: boolean;
+  
+  // Dynamic Chain Data (Fetched from Blockchain)
+  artistASolBalance: number; // TVL A
+  artistBSolBalance: number; // TVL B
+  artistASupply: number;
+  artistBSupply: number;
+  
+  // Transaction Accumulators
+  totalVolumeA: number;
+  totalVolumeB: number;
+  tradeCount: number;
+  uniqueTraders: number;
+}
+
+export interface BattleHistoryPoint {
+  timestamp: number;
+  tvlA: number;
+  tvlB: number;
+  volumeA: number;
+  volumeB: number;
+  priceA: number;
+  priceB: number;
+}
+
+export interface ReplayEvent {
+  timestamp: number;
+  type: 'LEAD_CHANGE' | 'WHALE_BUY' | 'WHALE_SELL' | 'START' | 'END';
+  description: string;
+  artistId?: 'A' | 'B';
+}
+
+export interface SettlementStats {
+  winnerId: string;
+  winMargin: number;
+  loserPoolTotal: number;
+  
+  // Distribution (Absolute SOL values)
+  toWinningTraders: number;
+  toWinningArtist: number;
+  toLosingArtist: number;
+  toPlatform: number;
+  toLosingTraders: number;
+  
+  // Artist Earnings
+  artistAEarnings: number;
+  artistBEarnings: number;
+  platformEarnings: number;
+}
+
+export interface TraderSimulation {
+  side: 'A' | 'B';
+  investmentSol: number;
+  tokensHeld: number;
+}
+
+export interface ArtistStats {
+  name: string;
+  wins: number;
+  losses: number;
+  totalBattles: number;
+  winRate: number;
+  avatar: string;
+  lastActive: string;
+}

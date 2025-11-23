@@ -1,0 +1,5 @@
+{
+  "name": "WaveWarz Analytics",
+  "description": "Real-time battle mechanics dashboard and settlement calculator for WaveWarz, visualizing TVL, trading volume, and prize pool distribution based on blockchain data.",
+  "requestFramePermissions": []
+}
