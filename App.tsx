@@ -1,13 +1,9 @@
-
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Trophy, 
   Activity, 
   TrendingUp, 
   DollarSign, 
-  PlayCircle,
-  StopCircle,
-  BarChart3,
   History,
   ArrowLeft,
   Loader2,
@@ -16,8 +12,8 @@ import {
   ExternalLink,
   LayoutGrid,
   ListOrdered,
-  CheckCircle,
-  ShieldCheck
+  ShieldCheck,
+  BarChart3
 } from 'lucide-react';
 import { BattleState, BattleSummary } from './types';
 import { calculateSettlement, formatSol, formatPct, calculateWinner, calculateLeaderboard } from './utils';
@@ -361,10 +357,11 @@ export default function App() {
                     </span>
                   </div>
                   
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
+                  {/* Changed from items-center to default (stretch/top) to fix Recharts width calculation */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                     <DistributionChart settlement={settlement} />
                     
-                    <div className="space-y-4">
+                    <div className="space-y-4 flex flex-col justify-center">
                       <div className="p-4 bg-slate-950/50 rounded-xl border-l-4 border-green-500">
                         <div className="flex justify-between items-center">
                           <span className="text-slate-400 text-sm">Winning Traders (40%)</span>
@@ -393,24 +390,26 @@ export default function App() {
 
                 {/* Trading Volume Chart */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 h-80">
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 h-80 flex flex-col">
                     <h3 className="text-lg font-bold text-white mb-6">Current TVL Comparison</h3>
-                    <ResponsiveContainer width="100%" height="80%">
-                      <BarChart data={tvlData} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-                        <XAxis type="number" hide />
-                        <YAxis type="category" dataKey="name" width={100} stroke="#94a3b8" fontSize={12} />
-                        <Tooltip 
-                          cursor={{fill: 'rgba(255,255,255,0.05)'}}
-                          contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f8fafc' }}
-                          formatter={(value: number) => formatSol(value)}
-                        />
-                        <Bar dataKey="value" radius={[0, 4, 4, 0]}>
-                          {tvlData.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={entry.color} />
-                          ))}
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
+                    <div className="flex-1 w-full min-h-0 min-w-0">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={tvlData} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                          <XAxis type="number" hide />
+                          <YAxis type="category" dataKey="name" width={100} stroke="#94a3b8" fontSize={12} />
+                          <Tooltip 
+                            cursor={{fill: 'rgba(255,255,255,0.05)'}}
+                            contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f8fafc' }}
+                            formatter={(value: number) => formatSol(value)}
+                          />
+                          <Bar dataKey="value" radius={[0, 4, 4, 0]}>
+                            {tvlData.map((entry, index) => (
+                              <Cell key={`cell-${index}`} fill={entry.color} />
+                            ))}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
                   </div>
                   
                   {/* Momentum Gauge */}

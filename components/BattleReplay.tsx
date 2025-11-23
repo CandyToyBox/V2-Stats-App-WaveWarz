@@ -151,7 +151,7 @@ export const BattleReplay: React.FC<Props> = ({ battle, onExit }) => {
           </div>
 
           {/* The Big Chart */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 h-80">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 h-80 min-w-0">
             <ReplayChart 
               history={history} 
               currentTimestamp={currentPoint.timestamp}
