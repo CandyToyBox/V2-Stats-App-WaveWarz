@@ -48,6 +48,14 @@ export interface BattleState extends BattleSummary {
   artistASupply: number;
   artistBSupply: number;
   
+  // Real On-Chain Addresses (Decoded from PDA)
+  battleAddress: string;     // The PDA of the battle
+  onChainMintA?: string;
+  onChainMintB?: string;
+  onChainWalletA?: string;
+  onChainWalletB?: string;
+  treasuryWallet?: string;
+
   // Transaction Accumulators
   totalVolumeA: number;
   totalVolumeB: number;
@@ -107,4 +115,9 @@ export interface ArtistStats {
   winRate: number;
   avatar: string;
   lastActive: string;
+  
+  // New Advanced Stats
+  totalVolume: number; // Total SOL volume generated in their battles
+  totalTVL: number;    // Peak TVL across all battles
+  biggestWin: number;  // Largest single battle TVL
 }

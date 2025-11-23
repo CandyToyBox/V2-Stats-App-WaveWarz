@@ -1,3 +1,4 @@
+
 import { BattleState, SettlementStats, TraderSimulation, BattleHistoryPoint, ReplayEvent, BattleSummary, ArtistStats } from './types';
 
 // Constants defined in the blueprint
@@ -16,6 +17,14 @@ const DISTRIBUTION = {
 
 export const calculateWinner = (state: BattleState): 'A' | 'B' => {
   return state.artistASolBalance > state.artistBSolBalance ? 'A' : 'B';
+};
+
+export const formatSol = (val: number): string => {
+  return `◎${(val || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+};
+
+export const formatPct = (val: number): string => {
+  return `${(val || 0).toFixed(2)}%`;
 };
 
 export const calculateSettlement = (state: BattleState): SettlementStats => {
@@ -41,11 +50,12 @@ export const calculateSettlement = (state: BattleState): SettlementStats => {
   // Accumulated fees during battle
   const artistAFees = state.totalVolumeA * FEES.ARTIST_TRADING_FEE;
   const artistBFees = state.totalVolumeB * FEES.ARTIST_TRADING_FEE;
+  
   const platformFees = (state.totalVolumeA + state.totalVolumeB) * FEES.PLATFORM_TRADING_FEE;
 
-  // Final Earnings
+  // Final Earnings Logic
   const artistAEarnings = artistAFees + (isAWin ? dist.toWinningArtist : dist.toLosingArtist);
-  const artistBEarnings = artistBFees + (!isAWin ? dist.toWinningArtist : dist.toLosingArtist);
+  const artistBEarnings = artistBFees + (isAWin ? dist.toLosingArtist : dist.toWinningArtist);
   const platformEarnings = platformFees + dist.toPlatform;
 
   return {
@@ -55,178 +65,114 @@ export const calculateSettlement = (state: BattleState): SettlementStats => {
     ...dist,
     artistAEarnings,
     artistBEarnings,
-    platformEarnings,
+    platformEarnings
   };
 };
 
-export const calculateTraderRoi = (
-  state: BattleState,
-  sim: TraderSimulation
-): { payout: number; roi: number; profit: number; note: string } => {
-  const winner = calculateWinner(state);
-  const settlement = calculateSettlement(state);
-  
-  const isWinningSide = (sim.side === 'A' && winner === 'A') || (sim.side === 'B' && winner === 'B');
-  
-  // Total tokens on the trader's side
-  const totalSideTokens = sim.side === 'A' ? state.artistASupply : state.artistBSupply;
-  const tokenShare = sim.tokensHeld / totalSideTokens;
+export const calculateTraderRoi = (battleState: BattleState, sim: TraderSimulation) => {
+    const winner = calculateWinner(battleState);
+    const isWin = sim.side === winner;
+    
+    // Simple simulation logic
+    const investment = sim.investmentSol;
+    let payout = 0;
+    let note = '';
 
-  let payout = 0;
-  let note = "";
+    if (isWin) {
+        // Winner share logic
+        const winnerPool = winner === 'A' ? battleState.artistASolBalance : battleState.artistBSolBalance;
+        const loserPool = winner === 'A' ? battleState.artistBSolBalance : battleState.artistASolBalance;
+        
+        const share = winnerPool > 0 ? investment / winnerPool : 0;
+        const winnings = loserPool * DISTRIBUTION.WINNING_TRADERS * share;
+        
+        payout = investment + winnings;
+        note = 'Winner payout + share of loser pool';
+    } else {
+        // Loser share logic
+        payout = investment * DISTRIBUTION.LOSING_TRADERS;
+        note = 'Loser retains 50% of value';
+    }
 
-  if (isWinningSide) {
-    // STEP 5: Winning Side Logic
-    const winnerPool = sim.side === 'A' ? state.artistASolBalance : state.artistBSolBalance;
+    const profit = payout - investment;
+    const roi = investment > 0 ? (profit / investment) * 100 : 0;
     
-    // Share of Winner's Pool (Their own pool preservation)
-    const shareOfOwnPool = tokenShare * winnerPool;
-    
-    // Share of 40% Bonus from Loser's Pool
-    const shareOfBonus = tokenShare * settlement.toWinningTraders;
-    
-    payout = shareOfOwnPool + shareOfBonus;
-    note = "Winner's Pool Share + 40% Loser's Pool Bonus";
-  } else {
-    // STEP 5: Losing Side Logic
-    const loserPool = sim.side === 'A' ? state.artistASolBalance : state.artistBSolBalance;
-    
-    // Trader's Original Value (Theoretical value before penalty)
-    const originalValue = tokenShare * loserPool;
-    
-    // Actual Payout (50% retention)
-    payout = originalValue * DISTRIBUTION.LOSING_TRADERS;
-    note = "50% Retention of Pool Value";
-  }
-
-  const profit = payout - sim.investmentSol;
-  const roi = (profit / sim.investmentSol) * 100;
-
-  return { payout, roi, profit, note };
+    return { roi, payout, profit, note };
 };
 
-export const formatSol = (val: number) => `◎ ${val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-export const formatUsd = (sol: number, price = 145) => `$${(sol * price).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
-export const formatPct = (val: number) => `${val.toFixed(2)}%`;
-
-export const calculateLeaderboard = (battles: BattleSummary[]): ArtistStats[] => {
-  const stats: Record<string, ArtistStats> = {};
-
-  const processArtist = (name: string, avatar: string, isWinner: boolean, date: string) => {
-    if (!stats[name]) {
-      stats[name] = { name, wins: 0, losses: 0, totalBattles: 0, winRate: 0, avatar, lastActive: date };
+export const generateBattleHistory = (battle: BattleState, count: number = 100) => {
+    const history: BattleHistoryPoint[] = [];
+    const events: ReplayEvent[] = [];
+    
+    const now = Date.now();
+    const start = battle.startTime || (now - 1000 * 60 * 60);
+    const end = battle.endTime || now;
+    const duration = end - start;
+    const step = duration / count;
+    
+    let currentA = 0;
+    let currentB = 0;
+    const targetA = battle.artistASolBalance;
+    const targetB = battle.artistBSolBalance;
+    
+    for (let i = 0; i <= count; i++) {
+        const time = start + (step * i);
+        const progress = i / count;
+        
+        // Cubic easing for visual effect
+        const ease = 1 - Math.pow(1 - progress, 3);
+        
+        currentA = targetA * ease;
+        currentB = targetB * ease;
+        
+        history.push({
+            timestamp: time,
+            tvlA: currentA,
+            tvlB: currentB,
+            volumeA: battle.totalVolumeA * ease,
+            volumeB: battle.totalVolumeB * ease,
+            priceA: 0,
+            priceB: 0
+        });
     }
-    stats[name].totalBattles += 1;
-    if (isWinner) stats[name].wins += 1;
-    else stats[name].losses += 1;
-    
-    // Update last active if newer
-    if (new Date(date) > new Date(stats[name].lastActive)) {
-      stats[name].lastActive = date;
-    }
-  };
 
-  battles.forEach(b => {
-    // Skip if no winner decided yet (active battles don't count towards W/L yet)
-    if (!b.winnerDecided) return;
+    events.push({ timestamp: start, type: 'START', description: 'Battle Begins' });
+    if (battle.isEnded) events.push({ timestamp: end, type: 'END', description: 'Battle Ends' });
 
-    // Determine winner based on CSV data if available, otherwise simulation logic isn't applied here 
-    // BUT the CSV doesn't strictly have a "winner" column populated in all rows provided. 
-    // We will assume simpler logic: If it's in the past, we use the winner_artist_a flag or random for demo if null
-    
-    // Note: The CSV provided has 'winner_artist_a' as null often. 
-    // For this Leaderboard Demo, we will infer the winner using the pool data if available, 
-    // or if pool is 0 (unfetched), we skip W/L calculation or mock it.
-    // For now, we only count battles where we can deduce a result.
-    
-    // However, to make the UI look populated for the user:
-    // We will assume "Completed" battles have a result.
-    // Since we don't have the real TVL in the CSV (it's 0), we can't calculate the real winner 
-    // without the API.
-    // **Fallback**: We will just count "Total Battles" for now to avoid fake win rates.
-    
-    processArtist(b.artistA.name, b.artistA.avatar, false, b.createdAt);
-    processArtist(b.artistB.name, b.artistB.avatar, false, b.createdAt);
-  });
-
-  return Object.values(stats)
-    .map(s => ({...s, winRate: s.totalBattles > 0 ? (s.wins / s.totalBattles) * 100 : 0}))
-    .sort((a, b) => b.totalBattles - a.totalBattles) // Sort by activity level for now
-    .slice(0, 10);
+    return { history, events };
 };
 
-// --- MOCK GENERATORS ---
-
-export const generateBattleHistory = (battle: BattleState, steps: number = 50): { history: BattleHistoryPoint[], events: ReplayEvent[] } => {
-  const history: BattleHistoryPoint[] = [];
-  const events: ReplayEvent[] = [];
-  
-  let currentTvlA = 100; // Start low
-  let currentTvlB = 100; // Start low
-  let currentVolA = 0;
-  let currentVolB = 0;
-  let isALeading = true;
-
-  const timeStep = (battle.endTime - battle.startTime) / steps;
-
-  for (let i = 0; i <= steps; i++) {
-    // Random walk simulation
-    const momentumA = Math.random() > 0.45 ? 1 : -0.2;
-    const momentumB = Math.random() > 0.45 ? 1 : -0.2;
+export const calculateLeaderboard = (library: BattleSummary[]): ArtistStats[] => {
+    const artistMap = new Map<string, ArtistStats>();
     
-    const changeA = Math.random() * 50 * momentumA;
-    const changeB = Math.random() * 50 * momentumB;
+    const getOrInit = (artist: any): ArtistStats => {
+        if (!artistMap.has(artist.name)) {
+            artistMap.set(artist.name, {
+                name: artist.name,
+                wins: 0,
+                losses: 0,
+                totalBattles: 0,
+                winRate: 0,
+                avatar: artist.avatar,
+                lastActive: "",
+                totalVolume: 0,
+                totalTVL: 0,
+                biggestWin: 0
+            });
+        }
+        return artistMap.get(artist.name)!;
+    };
 
-    currentTvlA = Math.max(50, currentTvlA + changeA);
-    currentTvlB = Math.max(50, currentTvlB + changeB);
-    
-    // Volume only goes up
-    const volChangeA = Math.abs(changeA) + Math.random() * 10;
-    const volChangeB = Math.abs(changeB) + Math.random() * 10;
-    
-    currentVolA += volChangeA;
-    currentVolB += volChangeB;
-
-    const timestamp = battle.startTime + (i * timeStep);
-
-    history.push({
-      timestamp,
-      tvlA: currentTvlA,
-      tvlB: currentTvlB,
-      volumeA: currentVolA,
-      volumeB: currentVolB,
-      priceA: currentTvlA / 1000,
-      priceB: currentTvlB / 1000
+    library.forEach(battle => {
+        const a = getOrInit(battle.artistA);
+        const b = getOrInit(battle.artistB);
+        
+        a.totalBattles++;
+        b.totalBattles++;
+        
+        if (battle.createdAt > a.lastActive) a.lastActive = battle.createdAt;
+        if (battle.createdAt > b.lastActive) b.lastActive = battle.createdAt;
     });
 
-    // Event Generation
-    if (i === 0) {
-      events.push({ timestamp, type: 'START', description: 'Battle Started' });
-    } else if (i === steps) {
-      events.push({ timestamp, type: 'END', description: 'Battle Ended' });
-    } else {
-      // Lead Change
-      const nowALeading = currentTvlA > currentTvlB;
-      if (nowALeading !== isALeading) {
-        events.push({
-          timestamp,
-          type: 'LEAD_CHANGE',
-          description: `${nowALeading ? battle.artistA.name : battle.artistB.name} takes the lead!`,
-          artistId: nowALeading ? 'A' : 'B'
-        });
-        isALeading = nowALeading;
-      }
-
-      // Whale Activity
-      if (changeA > 40) {
-        events.push({ timestamp, type: 'WHALE_BUY', description: 'Whale Purchase detected!', artistId: 'A' });
-      }
-      if (changeB > 40) {
-        events.push({ timestamp, type: 'WHALE_BUY', description: 'Whale Purchase detected!', artistId: 'B' });
-      }
-    }
-  }
-
-  // Force end state to match (smooth interpolation to final would be better, but this is mock)
-  return { history, events };
+    return Array.from(artistMap.values()).sort((a, b) => b.totalBattles - a.totalBattles);
 };

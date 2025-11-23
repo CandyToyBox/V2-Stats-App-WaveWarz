@@ -89,7 +89,12 @@ function decodeBattleAccount(data: Uint8Array, summary: BattleSummary): Partial<
   const startTime = Number(view.getBigInt64(offset, true)); offset += 8;
   const endTime = Number(view.getBigInt64(offset, true)); offset += 8;
 
-  offset += 32 * 5; // Wallets and mints
+  // Extract Public Keys (32 bytes each)
+  const artistAWallet = new PublicKey(data.slice(offset, offset + 32)).toBase58(); offset += 32;
+  const artistBWallet = new PublicKey(data.slice(offset, offset + 32)).toBase58(); offset += 32;
+  const treasuryWallet = new PublicKey(data.slice(offset, offset + 32)).toBase58(); offset += 32;
+  const mintA = new PublicKey(data.slice(offset, offset + 32)).toBase58(); offset += 32;
+  const mintB = new PublicKey(data.slice(offset, offset + 32)).toBase58(); offset += 32;
 
   const artistASupply = Number(view.getBigUint64(offset, true)) / 1_000_000; offset += 8;
   const artistBSupply = Number(view.getBigUint64(offset, true)) / 1_000_000; offset += 8;
@@ -118,6 +123,12 @@ function decodeBattleAccount(data: Uint8Array, summary: BattleSummary): Partial<
     artistASupply,
     artistBSupply,
     winnerDecided,
+    // On-Chain Address Data
+    onChainWalletA: artistAWallet,
+    onChainWalletB: artistBWallet,
+    onChainMintA: mintA,
+    onChainMintB: mintB,
+    treasuryWallet: treasuryWallet
   };
 }
 
@@ -133,6 +144,7 @@ export async function fetchBattleOnChain(summary: BattleSummary, forceRefresh = 
   const connection = new Connection(RPC_URL);
   const battlePda = deriveBattlePDA(summary.battleId);
   const vaultPda = deriveBattleVaultPDA(summary.battleId);
+  const battleAddress = battlePda.toBase58();
 
   // B. Fetch Account Info (RPC)
   const accountInfo = await connection.getAccountInfo(battlePda);
@@ -141,6 +153,7 @@ export async function fetchBattleOnChain(summary: BattleSummary, forceRefresh = 
     console.warn("Battle Account not found on-chain.");
     return {
       ...summary,
+      battleAddress,
       startTime: Date.now(),
       endTime: Date.now() + summary.battleDuration * 1000,
       isEnded: false,
@@ -161,7 +174,7 @@ export async function fetchBattleOnChain(summary: BattleSummary, forceRefresh = 
   // C. Fetch Transaction History (Graceful Fallback)
   let historyStats = { volumeA: 0, volumeB: 0, tradeCount: 0, uniqueTraders: 0, recentTrades: [] as RecentTrade[] };
   try {
-    historyStats = await fetchTransactionStats(battlePda.toBase58(), vaultPda.toBase58(), chainData.artistASolBalance || 0, chainData.artistBSolBalance || 0);
+    historyStats = await fetchTransactionStats(battleAddress, vaultPda.toBase58(), chainData.artistASolBalance || 0, chainData.artistBSolBalance || 0);
   } catch (e) {
     console.error("History fetch failed, returning partial data", e);
     // Return what we have from account data, zeroing out volume to prevent UI errors
@@ -170,6 +183,7 @@ export async function fetchBattleOnChain(summary: BattleSummary, forceRefresh = 
   const result: BattleState = {
     ...summary,
     ...chainData,
+    battleAddress, // Ensure address is part of state
     artistASolBalance: chainData.artistASolBalance ?? 0,
     artistBSolBalance: chainData.artistBSolBalance ?? 0,
     startTime: chainData.startTime ?? Date.now(),

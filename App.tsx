@@ -15,7 +15,9 @@ import {
   Twitter,
   ExternalLink,
   LayoutGrid,
-  ListOrdered
+  ListOrdered,
+  CheckCircle,
+  ShieldCheck
 } from 'lucide-react';
 import { BattleState, BattleSummary } from './types';
 import { calculateSettlement, formatSol, formatPct, calculateWinner, calculateLeaderboard } from './utils';
@@ -207,10 +209,28 @@ export default function App() {
         {currentView === 'dashboard' && battle && settlement && (
           <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
             
-            {/* Back Button */}
-            <button onClick={handleBack} className="flex items-center gap-2 text-slate-500 hover:text-white transition-colors text-sm font-medium">
-              <ArrowLeft size={16} /> Back to Archive
-            </button>
+            {/* Back Button & Chain Status */}
+            <div className="flex justify-between items-center">
+              <button onClick={handleBack} className="flex items-center gap-2 text-slate-500 hover:text-white transition-colors text-sm font-medium">
+                <ArrowLeft size={16} /> Back to Archive
+              </button>
+
+              <div className="flex gap-2">
+                 <a 
+                   href={`https://solscan.io/account/${battle.battleAddress}`} 
+                   target="_blank" 
+                   rel="noreferrer"
+                   className="flex items-center gap-2 text-xs bg-slate-900 border border-slate-800 text-slate-400 px-3 py-1.5 rounded-full hover:bg-slate-800 hover:text-white transition-colors"
+                 >
+                   <ExternalLink size={12} />
+                   <span>View Contract</span>
+                 </a>
+                 <div className="flex items-center gap-1.5 text-xs bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 px-3 py-1.5 rounded-full">
+                   <ShieldCheck size={12} />
+                   <span>Verified On-Chain</span>
+                 </div>
+              </div>
+            </div>
 
             {/* Battle Hero Section */}
             <section className="relative overflow-hidden rounded-3xl border border-slate-800 bg-slate-900/50 p-8 md:p-12">
@@ -429,6 +449,15 @@ export default function App() {
                      Fees are calculated from 1% volume + settlement bonuses.
                    </div>
                 </div>
+
+                {/* ON CHAIN DATA FOOTER */}
+                <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 text-xs font-mono text-slate-500 break-all space-y-2">
+                    <div className="font-bold text-slate-400 mb-1">PROGRAM ADDRESSES</div>
+                    <div>PDA: <span className="text-slate-300">{battle.battleAddress}</span></div>
+                    {battle.treasuryWallet && <div>Treasury: <span className="text-slate-300">{battle.treasuryWallet}</span></div>}
+                    {battle.onChainWalletA && <div>Wallet A: <span className="text-slate-300">{battle.onChainWalletA}</span></div>}
+                    {battle.onChainWalletB && <div>Wallet B: <span className="text-slate-300">{battle.onChainWalletB}</span></div>}
+                </div>
               </div>
             </div>
           </div>
@@ -437,4 +466,3 @@ export default function App() {
     </div>
   );
 }
-    
