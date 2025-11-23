@@ -134,6 +134,13 @@ export interface ArtistStats {
 
 // --- TRADER ANALYTICS TYPES ---
 
+export interface TraderTransaction {
+  signature: string;
+  type: 'INVEST' | 'PAYOUT';
+  amount: number;
+  date: string;
+}
+
 export interface TraderBattleHistory {
   battleId: string;
   artistAName: string;
@@ -145,6 +152,7 @@ export interface TraderBattleHistory {
   pnl: number;
   side?: 'A' | 'B';
   outcome: 'WIN' | 'LOSS' | 'PENDING';
+  transactions: TraderTransaction[];
 }
 
 export interface TraderProfileStats {

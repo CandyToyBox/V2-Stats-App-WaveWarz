@@ -1,5 +1,5 @@
 
-import { BattleState, BattleSummary, RecentTrade, TraderProfileStats, TraderBattleHistory } from '../types';
+import { BattleState, BattleSummary, RecentTrade, TraderProfileStats, TraderBattleHistory, TraderTransaction } from '../types';
 import { PublicKey, Connection } from '@solana/web3.js';
 
 // --- CONFIGURATION ---
@@ -367,7 +367,17 @@ export async function fetchTraderProfile(walletAddress: string, library: BattleS
              totalInvested += amount;
              battlesParticipated.add(knownBattle.id);
              
-             updateHistory(history, knownBattle.id, knownBattle.artistA.name, knownBattle.artistB.name, knownBattle.imageUrl, knownBattle.createdAt, amount, 0);
+             updateHistory(
+               history, 
+               knownBattle.id, 
+               knownBattle.artistA.name, 
+               knownBattle.artistB.name, 
+               knownBattle.imageUrl, 
+               knownBattle.createdAt, 
+               amount, 
+               0,
+               { signature: tx.signature, type: 'INVEST', amount, date: new Date(tx.timestamp * 1000).toISOString() }
+             );
           } else if (involvesProgram) {
              // UNKNOWN / UNLISTED Battle (Dynamic fallback for new battles not in data.ts)
              // We treat the destination account as the temporary ID
@@ -375,7 +385,17 @@ export async function fetchTraderProfile(walletAddress: string, library: BattleS
              totalInvested += amount;
              battlesParticipated.add(unknownId);
 
-             updateHistory(history, unknownId, "Unlisted Battle", "Unknown Opponent", "https://via.placeholder.com/150?text=?", new Date(tx.timestamp * 1000).toISOString(), amount, 0);
+             updateHistory(
+               history, 
+               unknownId, 
+               "Unlisted Battle", 
+               "Unknown Opponent", 
+               "", // Empty image for unlisted to trigger default icon
+               new Date(tx.timestamp * 1000).toISOString(), 
+               amount, 
+               0,
+               { signature: tx.signature, type: 'INVEST', amount, date: new Date(tx.timestamp * 1000).toISOString() }
+             );
           }
        }
        
@@ -386,12 +406,32 @@ export async function fetchTraderProfile(walletAddress: string, library: BattleS
           if (knownBattle) {
              totalPayout += amount;
              battlesParticipated.add(knownBattle.id);
-             updateHistory(history, knownBattle.id, knownBattle.artistA.name, knownBattle.artistB.name, knownBattle.imageUrl, knownBattle.createdAt, 0, amount);
+             updateHistory(
+               history, 
+               knownBattle.id, 
+               knownBattle.artistA.name, 
+               knownBattle.artistB.name, 
+               knownBattle.imageUrl, 
+               knownBattle.createdAt, 
+               0, 
+               amount,
+               { signature: tx.signature, type: 'PAYOUT', amount, date: new Date(tx.timestamp * 1000).toISOString() }
+             );
           } else if (involvesProgram) {
              const unknownId = `unlisted-${transfer.fromUserAccount.slice(0,8)}`;
              totalPayout += amount;
              battlesParticipated.add(unknownId);
-             updateHistory(history, unknownId, "Unlisted Battle", "Unknown Opponent", "https://via.placeholder.com/150?text=?", new Date(tx.timestamp * 1000).toISOString(), 0, amount);
+             updateHistory(
+               history, 
+               unknownId, 
+               "Unlisted Battle", 
+               "Unknown Opponent", 
+               "", // Empty image
+               new Date(tx.timestamp * 1000).toISOString(), 
+               0, 
+               amount,
+               { signature: tx.signature, type: 'PAYOUT', amount, date: new Date(tx.timestamp * 1000).toISOString() }
+             );
           }
        }
     }
@@ -430,12 +470,14 @@ function updateHistory(
   img: string, 
   date: string, 
   invested: number, 
-  payout: number
+  payout: number,
+  tx: TraderTransaction
 ) {
   const existingEntry = history.find(h => h.battleId === battleId);
   if (existingEntry) {
     existingEntry.invested += invested;
     existingEntry.payout += payout;
+    existingEntry.transactions.push(tx);
   } else {
      history.push({
        battleId,
@@ -446,7 +488,8 @@ function updateHistory(
        invested,
        payout,
        pnl: 0,
-       outcome: 'PENDING'
+       outcome: 'PENDING',
+       transactions: [tx]
      });
   }
 }
